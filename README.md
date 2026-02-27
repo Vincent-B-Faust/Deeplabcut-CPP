@@ -27,8 +27,31 @@ For multi-device deployment (pip/conda/docker/locked requirements), see `DEPLOYM
 
 ```text
 cpp_dlc_live/
+  DEPLOYMENT_REQUIREMENTS.md
   README.md
+  Dockerfile
+  environment.base.yml
+  environment.full.yml
+  environment.linux.base.yml
+  environment.linux.full.yml
+  environment.macos.base.yml
+  environment.macos.full.yml
+  environment.windows.base.yml
+  environment.windows.full.yml
   pyproject.toml
+  requirements-lock.txt
+  requirements-lock-linux.txt
+  requirements-lock-macos.txt
+  requirements-lock-windows.txt
+  requirements/
+    base.txt
+    ni.txt
+    dlc.txt
+    dev.txt
+    full.txt
+    full-linux.txt
+    full-macos.txt
+    full-windows.txt
   config/
     config_example.yaml
   cpp_dlc_live/
@@ -59,6 +82,8 @@ cpp_dlc_live/
 
 ## Installation
 
+### Option A: pip + requirements (recommended)
+
 1. Create and activate a virtual environment.
 
 ```bash
@@ -66,21 +91,63 @@ python -m venv .venv
 source .venv/bin/activate  # Windows: .venv\\Scripts\\activate
 ```
 
-2. Install package with development dependencies.
+2. Upgrade pip tools.
 
 ```bash
-pip install -e .[dev]
+python -m pip install --upgrade pip setuptools wheel
 ```
 
-3. Optional dependencies:
+3. Install one profile:
 
 ```bash
-pip install -e .[ni,dlc]
+# dryrun / analysis only
+pip install -r requirements/base.txt
+
+# full profile by OS:
+# Linux:   pip install -r requirements/full-linux.txt
+# macOS:   pip install -r requirements/full-macos.txt
+# Windows: pip install -r requirements/full-windows.txt
 ```
 
-4. NI-DAQmx requirement:
+4. Install project package:
+
+```bash
+pip install -e .
+```
+
+### Option B: Conda
+
+```bash
+# Linux
+conda env create -f environment.linux.base.yml
+conda activate cpp_dlc_live_linux_base
+# conda env create -f environment.linux.full.yml
+# conda activate cpp_dlc_live_linux_full
+
+# macOS
+# conda env create -f environment.macos.base.yml
+# conda activate cpp_dlc_live_macos_base
+# conda env create -f environment.macos.full.yml
+# conda activate cpp_dlc_live_macos_full
+
+# Windows
+# conda env create -f environment.windows.base.yml
+# conda activate cpp_dlc_live_windows_base
+# conda env create -f environment.windows.full.yml
+# conda activate cpp_dlc_live_windows_full
+```
+
+### Option C: Docker (dryrun/analysis/CI)
+
+```bash
+docker build -t cpp-dlc-live:base --build-arg INSTALL_PROFILE=base .
+docker run --rm -it cpp-dlc-live:base
+```
+
+### NI-DAQmx requirement
 - Install NI-DAQmx driver on the target machine.
 - Verify that `import nidaqmx` works in the same Python environment.
+- NI mode is recommended on Windows/Linux; macOS is typically dryrun/DLC only.
 
 ## Config File
 

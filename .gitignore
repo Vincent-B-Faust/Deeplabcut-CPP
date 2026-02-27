@@ -1,0 +1,17 @@
+# macOS
+.DS_Store
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+
+# Virtual env
+.venv/
+
+# Local outputs
+tmp/
+data/
+wheelhouse/

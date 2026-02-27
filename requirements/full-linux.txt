@@ -1,0 +1,4 @@
+-r base.txt
+nidaqmx>=0.8
+deeplabcut-live>=1.0.0
+pytest>=7.0

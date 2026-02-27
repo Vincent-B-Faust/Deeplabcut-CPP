@@ -1,0 +1,9 @@
+name: cpp_dlc_live_windows_base
+channels:
+  - conda-forge
+dependencies:
+  - python=3.10
+  - pip>=23.2
+  - pip:
+      - -r requirements/base.txt
+      - -e .

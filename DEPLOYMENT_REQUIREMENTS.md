@@ -14,6 +14,7 @@
 - 推荐 OS：
   - Windows 10/11（NI 场景优先）
   - Ubuntu 20.04/22.04（dryrun/dlc 常见）
+  - macOS 13/14（dryrun/dlc/analysis）
 - Python：`3.10`（推荐统一）
 - pip：`>=23.2`
 - 虚拟环境：`venv` 或 `conda` 均可
@@ -44,6 +45,7 @@ sudo apt-get install -y \
 - NI-DAQmx 驱动（目标机安装，建议与实验室设备统一版本）
 - NI MAX 可识别 `cDAQ1` 与目标模块（如 NI 9402）
 - Python `nidaqmx` 包可正常导入
+- 一般建议：NI 控制机使用 Windows/Linux；macOS 通常仅做 dryrun/分析
 
 ### 3.4 DLC-live 依赖
 
@@ -75,14 +77,26 @@ sudo apt-get install -y \
 - `requirements/dlc.txt`
 - `requirements/dev.txt`
 - `requirements/full.txt`
+- `requirements/full-linux.txt`
+- `requirements/full-macos.txt`
+- `requirements/full-windows.txt`
 - `requirements-lock.txt`（推荐锁定版）
+- `requirements-lock-linux.txt`
+- `requirements-lock-macos.txt`
+- `requirements-lock-windows.txt`
 - `environment.base.yml`
 - `environment.full.yml`
+- `environment.linux.base.yml`
+- `environment.linux.full.yml`
+- `environment.macos.base.yml`
+- `environment.macos.full.yml`
+- `environment.windows.base.yml`
+- `environment.windows.full.yml`
 - `Dockerfile`
 
 ## 5. 快速部署流程（推荐）
 
-### 5.1 Linux/macOS
+### 5.1 Linux
 
 ```bash
 python3 -m venv .venv
@@ -92,20 +106,30 @@ python -m pip install --upgrade pip setuptools wheel
 # 仅 dryrun
 pip install -r requirements/base.txt
 
-# NI 场景
-# pip install -r requirements/ni.txt
-
-# DLC 场景
-# pip install -r requirements/dlc.txt
-
-# 全功能
-# pip install -r requirements/full.txt
+# 全功能（NI + DLC + 测试）
+# pip install -r requirements/full-linux.txt
 
 # 当前项目可编辑安装
 pip install -e .
 ```
 
-### 5.2 Windows PowerShell
+### 5.2 macOS
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip setuptools wheel
+
+# 仅 dryrun
+pip install -r requirements/base.txt
+
+# 全功能（DLC + 测试，不含 NI）
+# pip install -r requirements/full-macos.txt
+
+pip install -e .
+```
+
+### 5.3 Windows PowerShell
 
 ```powershell
 python -m venv .venv
@@ -113,23 +137,31 @@ python -m venv .venv
 python -m pip install --upgrade pip setuptools wheel
 
 pip install -r requirements\base.txt
-# pip install -r requirements\ni.txt
-# pip install -r requirements\dlc.txt
-# pip install -r requirements\full.txt
+# pip install -r requirements\full-windows.txt
 
 pip install -e .
 ```
 
-### 5.3 Conda（可选，一键创建）
+### 5.4 Conda（按系统）
 
 ```bash
-# 基础环境
-conda env create -f environment.base.yml
-conda activate cpp_dlc_live_base
+# Linux
+conda env create -f environment.linux.base.yml
+conda activate cpp_dlc_live_linux_base
+# conda env create -f environment.linux.full.yml
+# conda activate cpp_dlc_live_linux_full
 
-# 全功能环境（NI + DLC + 测试）
-# conda env create -f environment.full.yml
-# conda activate cpp_dlc_live_full
+# macOS
+# conda env create -f environment.macos.base.yml
+# conda activate cpp_dlc_live_macos_base
+# conda env create -f environment.macos.full.yml
+# conda activate cpp_dlc_live_macos_full
+
+# Windows
+# conda env create -f environment.windows.base.yml
+# conda activate cpp_dlc_live_windows_base
+# conda env create -f environment.windows.full.yml
+# conda activate cpp_dlc_live_windows_full
 ```
 
 ## 6. Docker 部署（可选）
@@ -154,13 +186,23 @@ docker run --rm -it cpp-dlc-live:base
 
 ```bash
 mkdir -p wheelhouse
-pip download -r requirements/full.txt -d wheelhouse
+# Linux
+pip download -r requirements/full-linux.txt -d wheelhouse
+# macOS
+# pip download -r requirements/full-macos.txt -d wheelhouse
+# Windows
+# pip download -r requirements/full-windows.txt -d wheelhouse
 ```
 
 ### 7.2 离线机器安装
 
 ```bash
-pip install --no-index --find-links=wheelhouse -r requirements/full.txt
+# Linux
+pip install --no-index --find-links=wheelhouse -r requirements/full-linux.txt
+# macOS
+# pip install --no-index --find-links=wheelhouse -r requirements/full-macos.txt
+# Windows
+# pip install --no-index --find-links=wheelhouse -r requirements/full-windows.txt
 pip install -e . --no-deps
 ```
 
@@ -214,11 +256,17 @@ python -m cpp_dlc_live.cli run_realtime \
 ```bash
 # 1) 升级 requirements/*.txt 后，更新锁定文件
 # 2) 在目标 Python 版本（推荐 3.10）环境中验证
-pip install -r requirements-lock.txt
+# Linux
+pip install -r requirements-lock-linux.txt
+# macOS
+# pip install -r requirements-lock-macos.txt
+# Windows
+# pip install -r requirements-lock-windows.txt
 pytest -q
 python -m cpp_dlc_live.cli --help
 ```
 
 如果你的设备有平台差异（Windows/Linux、GPU/CPU），建议分别维护锁定文件，例如：
-- `requirements-lock-win.txt`
 - `requirements-lock-linux.txt`
+- `requirements-lock-macos.txt`
+- `requirements-lock-windows.txt`

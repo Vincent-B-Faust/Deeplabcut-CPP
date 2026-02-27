@@ -1,0 +1,10 @@
+name: cpp_dlc_live_linux_full
+channels:
+  - conda-forge
+dependencies:
+  - python=3.10
+  - pip>=23.2
+  - ffmpeg
+  - pip:
+      - -r requirements/full-linux.txt
+      - -e .
