@@ -1,232 +1,357 @@
 # cpp_dlc_live
 
-End-to-end Python project for DeepLabCut-live closed-loop 2-chamber CPP experiments with NI cDAQ laser control and offline analysis.
+End-to-end Python project for **real-time closed-loop 2-chamber CPP experiments** using:
+- video/camera acquisition
+- DeepLabCut-live inference
+- ROI chamber classification + debounce
+- NI cDAQ TTL control (`gated` / `startstop`) or `dryrun`
+- offline session analysis and issue traceback
 
-For multi-device deployment (pip/conda/docker/locked requirements), see `DEPLOYMENT_REQUIREMENTS.md`.
-For Chinese guides: `docs/operator_guide_zh.md` (operator) and `docs/developer_guide_zh.md` (developer).
+`README.md` is the default **English** documentation for GitHub.
 
-## Features
+Chinese docs:
+- [Chinese Documentation Entry](docs/user_guide_zh.md)
+- [Operator Guide (中文)](docs/operator_guide_zh.md)
+- [Developer Guide (中文)](docs/developer_guide_zh.md)
 
-- Real-time video acquisition, DLC-live inference, ROI chamber classification, debounce, and OpenCV overlay preview.
-- NI laser control modes:
-  - `gated`: continuous 20 Hz counter output + digital enable gating.
-  - `startstop`: start/stop counter output on chamber transitions with min on/off dwell.
-  - `dryrun`: no hardware output, logic-only simulation.
-- Safety-first behavior: any runtime exception forces laser OFF and performs graceful cleanup.
-- Session logging:
-  - `cpp_realtime_log.csv` frame-level records.
-  - `run.log` console/file logging.
-  - `metadata.json` full session metadata.
-  - `config_used.yaml` copied runtime config.
-- Offline analysis from session logs:
+For multi-device deployment details (pip/conda/docker/lock files), see:
+- [DEPLOYMENT_REQUIREMENTS.md](DEPLOYMENT_REQUIREMENTS.md)
+
+## Table of Contents
+
+1. [What This Project Solves](#what-this-project-solves)
+2. [Core Features](#core-features)
+3. [Repository Layout](#repository-layout)
+4. [Environment and Installation](#environment-and-installation)
+5. [DeepLabCut-live Model Preparation](#deeplabcut-live-model-preparation)
+6. [Configuration Guide](#configuration-guide)
+7. [CLI Commands](#cli-commands)
+8. [Recommended End-to-End Workflow](#recommended-end-to-end-workflow)
+9. [Session Outputs and File Meanings](#session-outputs-and-file-meanings)
+10. [Performance, Safety, and Failure Behavior](#performance-safety-and-failure-behavior)
+11. [Troubleshooting](#troubleshooting)
+12. [Development and Tests](#development-and-tests)
+
+## What This Project Solves
+
+This project is designed for 2-chamber CPP experiments where behavior state controls stimulation in real time.
+
+Runtime loop:
+1. Acquire frame from camera/video.
+2. Infer pose with DLC-live.
+3. Determine chamber (`chamber1/chamber2/neutral/unknown`) from ROI.
+4. Stabilize chamber state with debounce.
+5. Control laser output (`ON` in chamber1, `OFF` otherwise by default).
+6. Save frame-level logs and metadata.
+7. Optionally preview and record annotated overlay video.
+
+After runtime:
+1. Analyze `cpp_realtime_log.csv` into summary metrics.
+2. Optionally generate plots.
+3. Analyze issue events and incident reports for traceback.
+
+## Core Features
+
+- Real-time modules:
+  - camera/video stream (`opencv`)
+  - DLC-live inference (`dlclive`) with configurable backend (`auto/pytorch/tensorflow`)
+  - polygon/rect ROI classification
+  - debounce for robust state transitions
+  - confidence threshold + hold-last-valid logic
+  - OpenCV overlay preview (including runtime timer `HH:MM:SS.mmm`)
+- Laser control modes:
+  - `gated`: continuous counter pulse + digital enable line
+  - `startstop`: on-demand counter start/stop with min on/off dwell
+  - `dryrun`: no hardware output, full logic path enabled
+- Safety behavior:
+  - default output state is OFF
+  - on camera/DLC/DAQ/ROI exceptions, force OFF and shutdown cleanly
+- Recording and traceability:
+  - frame-level CSV log
+  - session metadata + config copy + config hash
+  - structured issue events (`JSONL`)
+  - incident report JSON on runtime failure
+- Offline analysis:
   - chamber occupancy time
   - distance and mean speed (px/s and optional cm/s)
   - laser-on duration
-  - optional plots
+  - optional trajectory/speed/occupancy plots
+- Test coverage includes ROI, debounce, analysis metrics, and issue analysis parser.
 
-## Repository Structure
+## Repository Layout
 
 ```text
 cpp_dlc_live/
-  DEPLOYMENT_REQUIREMENTS.md
   README.md
+  DEPLOYMENT_REQUIREMENTS.md
   Dockerfile
-  environment.base.yml
-  environment.full.yml
-  environment.linux.base.yml
-  environment.linux.full.yml
-  environment.macos.base.yml
-  environment.macos.full.yml
-  environment.windows.base.yml
-  environment.windows.full.yml
   pyproject.toml
-  requirements-lock.txt
-  requirements-lock-linux.txt
-  requirements-lock-macos.txt
-  requirements-lock-windows.txt
   requirements/
-    base.txt
-    ni.txt
-    dlc.txt
-    dev.txt
-    full.txt
-    full-linux.txt
-    full-macos.txt
-    full-windows.txt
+  environment.*.yml
   config/
     config_example.yaml
   cpp_dlc_live/
-    __init__.py
     cli.py
     realtime/
-      camera.py
-      dlc_runtime.py
-      roi.py
-      debounce.py
-      logging_utils.py
-      recorder.py
-      controller_ni.py
-      controller_base.py
-      app.py
     analysis/
-      analyze.py
-      issues.py
-      plots.py
-      metrics.py
     utils/
-      time_utils.py
-      io_utils.py
   tests/
-    test_roi.py
-    test_debounce.py
-    test_analysis_metrics.py
-    test_issue_analysis.py
+  docs/
 ```
 
-## Installation
+Key code entry points:
+- CLI entry: `cpp_dlc_live/cli.py`
+- Realtime app: `cpp_dlc_live/realtime/app.py`
+- Offline analysis: `cpp_dlc_live/analysis/analyze.py`
+- Issue analysis: `cpp_dlc_live/analysis/issues.py`
 
-### Option A: pip + requirements (recommended)
+## Environment and Installation
 
-1. Create and activate a virtual environment.
+## Supported OS
+
+- Windows 10/11 (recommended for NI workflows)
+- Linux (dryrun/DLC/NI depending on driver setup)
+- macOS (typically dryrun + analysis, NI is uncommon)
+
+Recommended Python: `3.10`.
+
+## Option A: pip + requirements (recommended)
+
+1. Create and activate virtual environment.
 
 ```bash
 python -m venv .venv
-source .venv/bin/activate  # Windows: .venv\\Scripts\\activate
+# Linux/macOS:
+source .venv/bin/activate
+# Windows PowerShell:
+# .\.venv\Scripts\Activate.ps1
 ```
 
-2. Upgrade pip tools.
+2. Upgrade packaging tools.
 
 ```bash
 python -m pip install --upgrade pip setuptools wheel
 ```
 
-3. Install one profile:
+3. Install profile.
 
 ```bash
-# dryrun / analysis only
+# Minimal dryrun/analysis
 pip install -r requirements/base.txt
 
-# full profile by OS:
+# DLC-enabled (no NI)
+pip install -r requirements/dlc.txt
+
+# Full profile by OS
 # Linux:   pip install -r requirements/full-linux.txt
 # macOS:   pip install -r requirements/full-macos.txt
 # Windows: pip install -r requirements/full-windows.txt
 ```
 
-4. Install project package:
+4. Install package in editable mode.
 
 ```bash
 pip install -e .
 ```
 
-### Option B: Conda
+## Option B: conda
 
 ```bash
-# Linux
-conda env create -f environment.linux.base.yml
-conda activate cpp_dlc_live_linux_base
-# conda env create -f environment.linux.full.yml
-# conda activate cpp_dlc_live_linux_full
+# Windows base
+conda env create -f environment.windows.base.yml
+conda activate cpp_dlc_live_windows_base
 
-# macOS
-# conda env create -f environment.macos.base.yml
-# conda activate cpp_dlc_live_macos_base
-# conda env create -f environment.macos.full.yml
-# conda activate cpp_dlc_live_macos_full
-
-# Windows
-# conda env create -f environment.windows.base.yml
-# conda activate cpp_dlc_live_windows_base
+# Windows full
 # conda env create -f environment.windows.full.yml
 # conda activate cpp_dlc_live_windows_full
+
+# Linux/macOS variants are also provided:
+# environment.linux.*.yml
+# environment.macos.*.yml
 ```
 
-### Option C: Docker (dryrun/analysis/CI)
+## NI requirement (only NI hardware mode)
+
+- Install NI-DAQmx driver on target machine.
+- Confirm NI device visibility in NI MAX.
+- Confirm Python package works in your active env:
 
 ```bash
-docker build -t cpp-dlc-live:base --build-arg INSTALL_PROFILE=base .
-docker run --rm -it cpp-dlc-live:base
+python -c "import nidaqmx; print('nidaqmx ok')"
 ```
 
-### NI-DAQmx requirement
-- Install NI-DAQmx driver on the target machine.
-- Verify that `import nidaqmx` works in the same Python environment.
-- NI mode is recommended on Windows/Linux; macOS is typically dryrun/DLC only.
+## Quick environment sanity checks
 
-## Config File
+```bash
+python -m cpp_dlc_live.cli --help
+python -c "import cv2, numpy, pandas, yaml; print('base ok')"
+python -c "import dlclive; print('dlclive ok')"   # if DLC is needed
+```
 
-Use `config/config_example.yaml` as template. All runtime parameters are loaded from YAML.
+## DeepLabCut-live Model Preparation
 
-Main sections:
-- `project`: project name, session id policy, output root.
-- `camera`: source, resolution, target fps, transform.
-- `dlc`: model path, bodypart, confidence threshold, optional smoothing.
-- `roi`: chamber1/chamber2/neutral polygons or rectangles, neutral strategy, debounce.
-- `laser_control`: `enabled`, mode (`gated`/`startstop`/`dryrun`), channels and timing.
-- `analysis`: `cm_per_px`, plot output toggle.
-- `preview_recording`: optional recording of realtime preview video.
-- `runtime_logging`: runtime issue/heartbeat/perf warning logging controls.
+This is the most common source of runtime confusion.
 
-Field reference:
+## Important distinction
 
-- `project.name`: project identifier written into metadata.
-- `project.session_id`: fixed session ID or `auto_timestamp` (auto generated at runtime).
-- `project.out_dir`: root directory for all session outputs.
-- `camera.source`: OpenCV source (`0`, `1`, file path, or stream URL).
-- `camera.width` / `camera.height`: requested capture resolution.
-- `camera.fps_target`: requested camera FPS.
-- `camera.flip`: horizontal flip for preview/inference.
-- `camera.rotate_deg`: rotation angle (0/90/180/270 recommended).
-- `dlc.model_path`: exported DLC-live model directory.
-- `dlc.backend`: inference backend (`auto` | `pytorch` | `tensorflow`).
-- `dlc.bodypart`: tracked point (`center` by default, fallback supported).
-- `dlc.p_thresh`: confidence threshold.
-- `dlc.smoothing.enabled`: enable moving-average smoothing on tracked coordinates.
-- `dlc.smoothing.window`: smoothing window size in frames.
-- `roi.type`: `polygon` or `rect`.
-- `roi.chamber1` / `roi.chamber2` / `roi.neutral`: ROI points in image coordinates.
-- `roi.strategy_on_neutral`: `off` | `hold_last` | `unknown`.
-- `roi.debounce_frames`: N consecutive frames needed for stable chamber switch.
-- `laser_control.enabled`: master laser control switch.
-- `laser_control.mode`: `gated` | `startstop` | `dryrun`.
-- `laser_control.freq_hz`: pulse frequency (default 20 Hz).
-- `laser_control.duty_cycle`: pulse duty cycle (default 0.05).
-- `laser_control.ctr_channel`: NI counter output channel (example `cDAQ1Mod4/ctr0`).
-- `laser_control.pulse_term`: NI pulse route terminal (example `/cDAQ1Mod4/PFI0`).
-- `laser_control.enable_line`: NI digital line for gating mode.
-- `laser_control.min_on_s` / `laser_control.min_off_s`: minimum on/off dwell for startstop mode.
-- `laser_control.unknown_policy`: unknown-state behavior (`off` | `hold_last`).
-- `laser_control.fallback_to_dryrun`: auto-fallback to dryrun when NI init fails.
-- `analysis.cm_per_px`: calibration scale for cm metrics (optional).
-- `analysis.output_plots`: enable trajectory/speed/occupancy plots.
-- `preview_recording.enabled`: enable saving preview video to file.
-- `preview_recording.filename`: output filename (relative path is resolved under session directory).
-- `preview_recording.codec`: OpenCV 4-char codec (example `mp4v`).
-- `preview_recording.fps`: optional override fps for writer (uses camera fps/target if null).
-- `preview_recording.overlay`: save overlay frame (`true`) or raw frame (`false`).
-- `runtime_logging.enabled`: enable structured issue event logging.
-- `runtime_logging.issue_events_file`: structured issue log filename (JSONL).
-- `runtime_logging.heartbeat_interval_s`: heartbeat logging interval.
-- `runtime_logging.low_conf_warn_every_n`: periodic warning interval for low-confidence frames.
-- `runtime_logging.inference_warn_ms`: warning threshold for slow inference.
-- `runtime_logging.fps_warn_below`: warning threshold for low FPS.
+- `dlc-models-pytorch/.../train/snapshot-*.pt` are **training snapshots**.
+- For realtime DLCLive inference, use **exported model artifacts** expected by DLCLive.
 
-## DeepLabCut-live Model
+If you directly point `model_path` to an incompatible training snapshot, you may see errors like:
+- `KeyError: 'config'`
+- fallback to mock runtime
 
-This project expects an exported DLC-live model path under `dlc.model_path`.
-Export references:
+## Recommended workflow
 
-- DeepLabCut docs: `https://deeplabcut.github.io/DeepLabCut/`
-- DeepLabCut-live repo/docs: `https://github.com/DeepLabCut/DeepLabCut-live`
+1. Train/evaluate in DeepLabCut.
+2. Export model for live inference per official docs.
+3. Point `dlc.model_path` to exported DLCLive-compatible model path.
+4. Set backend explicitly for DLC 3.0 PyTorch projects:
+   - `dlc.backend: pytorch`
 
-Typical workflow:
+References:
+- DeepLabCut docs: <https://deeplabcut.github.io/DeepLabCut/>
+- DeepLabCut-live repo/docs: <https://github.com/DeepLabCut/DeepLabCut-live>
 
-1. Train/evaluate your DLC model in DeepLabCut.
-2. Export the model for live inference (DLCLive format) per official docs.
-3. Set `dlc.model_path` in YAML to the exported directory.
+## Configuration Guide
 
-## CLI Usage
+Use `config/config_example.yaml` as a template, then create your local runtime config (for example `config/config_windows_dryrun.yaml`).
 
-### 1) Run realtime closed-loop
+Note: always replace any machine-specific paths with your own absolute paths.
+
+## Top-level config sections
+
+- `project`: session naming and output location
+- `camera`: source and transform options
+- `dlc`: model path/backend/bodypart/confidence/smoothing
+- `roi`: chamber polygons/rectangles + neutral policy + debounce
+- `laser_control`: hardware strategy and channels
+- `analysis`: offline metric options
+- `preview_recording`: optional save of preview video
+- `runtime_logging`: issue/heartbeat/warning settings
+
+## Field reference (practical)
+
+### `project`
+- `project.session_id`: fixed id or `auto_timestamp`
+- `project.out_dir`: output root; session subdirectory is created automatically
+
+### `camera`
+- `camera.source`: camera index (`0`) or video path/URL
+- `camera.width`, `camera.height`, `camera.fps_target`
+- `camera.flip`, `camera.rotate_deg`
+
+### `dlc`
+- `dlc.model_path`: DLCLive model path (typically exported artifact)
+- `dlc.backend`: `auto` | `pytorch` | `tensorflow`
+- `dlc.bodypart`: tracked bodypart name (must exist in model, unless fallback logic is intentional)
+- `dlc.p_thresh`: confidence threshold
+- `dlc.smoothing.enabled`, `dlc.smoothing.window`
+
+### `roi`
+- `roi.type`: `polygon` | `rect`
+- `roi.chamber1`, `roi.chamber2`, optional `roi.neutral`
+- `roi.strategy_on_neutral`: `off` | `hold_last` | `unknown`
+- `roi.debounce_frames`
+
+### `laser_control`
+- `laser_control.enabled`
+- `laser_control.mode`: `gated` | `startstop` | `dryrun`
+- `laser_control.freq_hz`, `laser_control.duty_cycle`
+- `laser_control.ctr_channel`, `laser_control.pulse_term`, `laser_control.enable_line`
+- `laser_control.min_on_s`, `laser_control.min_off_s` (startstop)
+- `laser_control.unknown_policy`: `off` | `hold_last`
+- `laser_control.fallback_to_dryrun`
+
+### `analysis`
+- `analysis.cm_per_px`
+- `analysis.output_plots`
+
+### `preview_recording`
+- `preview_recording.enabled`: save preview video or not
+- `preview_recording.filename`: relative path is resolved under session dir
+- `preview_recording.codec`: 4-char codec (e.g. `mp4v`)
+- `preview_recording.fps`: optional override
+- `preview_recording.overlay`: save annotated frame (`true`) or raw frame (`false`)
+
+### `runtime_logging`
+- `runtime_logging.enabled`
+- `runtime_logging.issue_events_file`
+- `runtime_logging.heartbeat_interval_s`
+- `runtime_logging.low_conf_warn_every_n`
+- `runtime_logging.inference_warn_ms`
+- `runtime_logging.fps_warn_below`
+
+## Example: minimal Windows dryrun + DLC
+
+```yaml
+project:
+  name: cpp_dlc_live
+  session_id: auto_timestamp
+  out_dir: D:/data/cpp_runs
+
+camera:
+  source: C:/data/videos/test.avi
+  width: 1280
+  height: 720
+  fps_target: 30
+  flip: false
+  rotate_deg: 0
+
+dlc:
+  model_path: C:/data/models/exported-models-pytorch/your_model.pt
+  backend: pytorch
+  bodypart: Mouse
+  p_thresh: 0.2
+  smoothing:
+    enabled: false
+    window: 5
+
+roi:
+  type: polygon
+  chamber1: [[50, 50], [600, 50], [600, 650], [50, 650]]
+  chamber2: [[680, 50], [1230, 50], [1230, 650], [680, 650]]
+  strategy_on_neutral: off
+  debounce_frames: 8
+
+laser_control:
+  enabled: true
+  mode: dryrun
+  freq_hz: 20.0
+  duty_cycle: 0.05
+  ctr_channel: cDAQ1Mod4/ctr0
+  pulse_term: /cDAQ1Mod4/PFI0
+  enable_line: cDAQ1Mod4/port0/line0
+  min_on_s: 0.2
+  min_off_s: 0.2
+  unknown_policy: off
+  fallback_to_dryrun: true
+
+analysis:
+  cm_per_px: null
+  output_plots: true
+
+preview_recording:
+  enabled: true
+  filename: preview_overlay.mp4
+  codec: mp4v
+  fps: 30
+  overlay: true
+
+runtime_logging:
+  enabled: true
+  issue_events_file: issue_events.jsonl
+  heartbeat_interval_s: 5.0
+  low_conf_warn_every_n: 30
+  inference_warn_ms: 80.0
+  fps_warn_below: 10.0
+```
+
+## CLI Commands
+
+The project installs a console script `cpp-dlc-live`, and also supports `python -m cpp_dlc_live.cli`.
+
+## 1) `run_realtime`
 
 ```bash
 cpp-dlc-live run_realtime --config config/config_example.yaml
@@ -235,88 +360,196 @@ cpp-dlc-live run_realtime --config config/config_example.yaml
 Common options:
 - `--out_dir /path/to/output_root`
 - `--duration_s 600`
-- `--camera_source 0` (or video file/stream URL)
-- `--no_preview`
+- `--camera_source 0` (or video path/URL)
+- `--no_preview` (disable window display)
 
-Tip:
-- Preview recording is configured in YAML via `preview_recording.*` and can run even with `--no_preview`.
+Notes:
+- `preview_recording.enabled=true` can still record video even when `--no_preview` is used.
+- On input video EOF, run exits normally.
 
-### 2) Analyze a session
+## 2) `analyze_session`
 
 ```bash
 cpp-dlc-live analyze_session --session_dir data/session_20260226_120000
 ```
 
 Options:
-- `--cm_per_px 0.05` (override config)
+- `--cm_per_px 0.05`
 - `--no_plots`
 
-### 3) Analyze runtime issues for traceback
+## 3) `analyze_issues`
 
 ```bash
 cpp-dlc-live analyze_issues --session_dir data/session_20260226_120000
 ```
 
 Options:
-- `--issue_file custom_issue_events.jsonl` (absolute path or relative to `session_dir`)
+- `--issue_file custom_issue_events.jsonl`
 
 Outputs:
-- `issue_summary.csv`: event count by event/level with first/last timestamp and frame.
-- `issue_timeline.csv`: normalized event timeline.
-- `incident_summary.csv`: parsed `incident_report_*.json` summary.
+- `issue_summary.csv`
+- `issue_timeline.csv`
+- `incident_summary.csv`
 
-### 4) Calibrate ROI interactively
+## 4) `calibrate_roi`
 
 ```bash
 cpp-dlc-live calibrate_roi --config config/config_example.yaml --camera_source 0
 ```
 
 Options:
-- `--image /path/to/background.png` (calibrate on static image)
+- `--image /path/to/background.png`
 - `--save_to /path/to/new_config.yaml`
 - `--without_neutral`
 
-## Runtime Outputs
+Calibrator controls:
+- left click: add point
+- `u`: undo
+- `r`: reset current ROI
+- `n`: finish current ROI and move next
+- `s`: save
+- `q`/`Esc`: cancel
 
-Each session directory contains:
-- `cpp_realtime_log.csv`
-- `metadata.json`
-- `config_used.yaml`
-- `run.log`
-- `preview_overlay.mp4` (if `preview_recording.enabled=true`, filename configurable)
-- `issue_events.jsonl` (if `runtime_logging.enabled=true`)
-- `incident_report_*.json` (on runtime exceptions)
-- `issue_summary.csv`, `issue_timeline.csv`, `incident_summary.csv` after `analyze_issues`
-- `summary.csv` and plot files after offline analysis
+## Recommended End-to-End Workflow
 
-Notes:
+## First-time bring-up (dryrun)
 
-- `metadata.json` includes start/end time, model info, ROI, DAQ config, camera info, and config hash.
-- `summary.csv` uses frame-to-frame `dt`; last frame `dt` is estimated by median previous positive `dt`, so occupancy sum is approximately total session duration.
+1. Install environment.
+2. Prepare config copy from template.
+3. Calibrate ROI (`calibrate_roi`).
+4. Run dryrun for 30–60 seconds with a known video.
+5. Confirm output files are complete.
+6. Run `analyze_session` and `analyze_issues` to validate post-processing.
 
-## Performance Targets
+## DLC validation
 
-- Target FPS: `>= 15` (prefer `>= 30` when hardware allows).
-- Target mean inference latency: `< 50 ms`.
-- Chamber switch latency: approximately `debounce_frames / actual_fps`.
-- Recorded online metrics: `inference_ms`, `fps_est` in `cpp_realtime_log.csv`.
+1. Ensure `run.log` contains `Using DLCLive runtime ...`.
+2. Confirm `metadata.json` shows `dlc_model.runtime = dlclive` (not `mock`).
+3. Verify bodypart names match your model metadata.
 
-## FAQ
+## NI hardware validation
 
-### DAQ routing/channel error
-- Verify `ctr_channel`, `pulse_term`, `enable_line` in config.
-- Check NI MAX for channel names and route capability.
-- Ensure no other process occupies the same task/channel.
+1. Keep `fallback_to_dryrun=true` during first hardware tests.
+2. Validate channels/routes in NI MAX.
+3. Start with short sessions and monitor transitions in logs.
 
-### Camera FPS lower than expected
-- Reduce frame size.
-- Disable preview for benchmarking.
-- Verify camera backend and USB bandwidth.
+## Session Outputs and File Meanings
 
-### ROI calibration issues
-- Use high-contrast background frame.
-- In calibrator: left click add points, `u` undo, `r` reset ROI, `n` next ROI, `s` save.
+Each session directory includes (depending on command and options):
 
-### Safety behavior
-- Default laser state is OFF.
-- Any camera/DLC/DAQ/ROI exception attempts to force OFF before exit.
+- `cpp_realtime_log.csv`: frame-level runtime records
+- `metadata.json`: run metadata + runtime stats + config hash + preview recording result
+- `config_used.yaml`: exact runtime config copy
+- `run.log`: readable runtime log
+- `preview_overlay.mp4` (configurable): preview recording output when enabled
+- `issue_events.jsonl`: structured issue/event stream
+- `incident_report_*.json`: runtime exception report snapshots
+- `summary.csv`: offline analysis summary
+- `trajectory.png`, `speed_over_time.png`, `occupancy_over_time.png` (if plot output enabled)
+- `issue_summary.csv`, `issue_timeline.csv`, `incident_summary.csv` (from `analyze_issues`)
+
+## Core columns in `cpp_realtime_log.csv`
+
+- `t_wall`, `frame_idx`
+- `x`, `y`, `p`
+- `chamber_raw`, `chamber`
+- `laser_state`
+- `inference_ms`, `fps_est`
+
+## Core columns in `summary.csv`
+
+- `time_ch1_s`, `time_ch2_s`, `time_neutral_s`
+- `distance_px`, `distance_cm`
+- `mean_speed_px_s`, `mean_speed_cm_s`
+- `laser_on_time_s`
+- `session_duration_s`, `n_samples`
+
+## Performance, Safety, and Failure Behavior
+
+## Performance targets
+
+- Target FPS: `>= 15` (prefer `>= 30` if hardware allows)
+- Target mean inference latency: `< 50 ms` (hardware dependent)
+- Chamber switch latency: approximately `debounce_frames / actual_fps`
+
+## Safety strategy
+
+- Default stimulation state is OFF.
+- On runtime exceptions (camera/DLC/DAQ/ROI), system attempts to force OFF before exit.
+- Laser controller stop is called in cleanup path.
+
+## Failure traceability
+
+- Text log: `run.log`
+- Structured events: `issue_events.jsonl`
+- Exception snapshot: `incident_report_*.json`
+
+## Troubleshooting
+
+## `No module named tensorflow` while using PyTorch model
+
+Symptom:
+- runtime tries TensorFlow runner and falls back to mock.
+
+Actions:
+1. Set `dlc.backend: pytorch` in config.
+2. Verify effective config in session `config_used.yaml`.
+3. Check dlclive signature:
+
+```bash
+python -c "import dlclive,inspect; from dlclive import DLCLive; print(dlclive.__version__); print(inspect.signature(DLCLive.__init__))"
+```
+
+## `PermissionError` on model path ending with `.../train`
+
+Cause:
+- `model_path` points to a **directory**, but loader expects a model file/path format usable by DLCLive.
+
+Action:
+- point to exported model artifact expected by DLCLive, not the train folder itself.
+
+## `KeyError: 'config'` when loading `.pt`
+
+Cause:
+- `.pt` is a training snapshot, not a DLCLive-exported model artifact.
+
+Action:
+- export model for live inference and update `dlc.model_path` accordingly.
+
+## Model appears inaccurate although training looked good
+
+Checks:
+1. Ensure runtime is actually `dlclive` (not `mock`).
+2. Ensure `dlc.bodypart` exists in model bodypart names.
+3. Temporarily reduce `p_thresh` and disable smoothing for debugging.
+4. Recalibrate ROI using the exact runtime camera geometry.
+
+## ROI looks shifted
+
+Cause:
+- ROI calibrated under different transform/resolution.
+
+Action:
+- keep `camera.width/height/flip/rotate_deg` consistent between calibration and runtime.
+
+## Development and Tests
+
+Run test suite:
+
+```bash
+pytest -q
+```
+
+Useful checks before commit:
+
+```bash
+python -m cpp_dlc_live.cli --help
+python -m py_compile cpp_dlc_live/realtime/app.py
+```
+
+## Related Documents
+
+- [DEPLOYMENT_REQUIREMENTS.md](DEPLOYMENT_REQUIREMENTS.md)
+- [Chinese Documentation Entry](docs/user_guide_zh.md)
+- [Operator Guide (中文)](docs/operator_guide_zh.md)
+- [Developer Guide (中文)](docs/developer_guide_zh.md)
