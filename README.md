@@ -176,6 +176,7 @@ Field reference:
 - `camera.flip`: horizontal flip for preview/inference.
 - `camera.rotate_deg`: rotation angle (0/90/180/270 recommended).
 - `dlc.model_path`: exported DLC-live model directory.
+- `dlc.backend`: inference backend (`auto` | `pytorch` | `tensorflow`).
 - `dlc.bodypart`: tracked point (`center` by default, fallback supported).
 - `dlc.p_thresh`: confidence threshold.
 - `dlc.smoothing.enabled`: enable moving-average smoothing on tracked coordinates.

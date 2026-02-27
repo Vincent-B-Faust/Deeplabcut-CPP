@@ -56,9 +56,10 @@ class MockDLCRuntime(RuntimeBase):
 
 
 class DLCLiveRuntime(RuntimeBase):
-    def __init__(self, model_path: str, bodypart: str = "center"):
+    def __init__(self, model_path: str, bodypart: str = "center", backend: str = "auto"):
         self.model_path = str(model_path)
         self.bodypart = bodypart
+        self.backend = _normalize_backend(backend)
         self._initialized = False
 
         try:
@@ -69,7 +70,18 @@ class DLCLiveRuntime(RuntimeBase):
         self._model_cfg = _load_model_cfg(model_path)
         self._bodyparts = _extract_bodyparts(self._model_cfg)
         self._snapshot = _extract_snapshot(self._model_cfg)
-        self._dlc = DLCLive(model_path, processor=Processor())
+        processor = Processor()
+
+        # Prefer explicit backend selection for DLC 3.0 PyTorch models.
+        model_type_value = _resolve_model_type_value(self.backend)
+        if model_type_value is not None:
+            try:
+                self._dlc = DLCLive(model_path, processor=processor, model_type=model_type_value)
+            except TypeError:
+                # Backward compatibility for older dlclive signatures.
+                self._dlc = DLCLive(model_path, processor=processor)
+        else:
+            self._dlc = DLCLive(model_path, processor=processor)
 
     def infer(self, frame: np.ndarray) -> PoseResult:
         if not self._initialized:
@@ -89,19 +101,21 @@ class DLCLiveRuntime(RuntimeBase):
             "model_path": self.model_path,
             "bodyparts": self._bodyparts,
             "target_bodypart": self.bodypart,
+            "backend": self.backend,
             "snapshot": self._snapshot,
         }
 
 
 def build_runtime(dlc_cfg: Dict[str, Any], logger: Optional[logging.Logger] = None) -> RuntimeBase:
     bodypart = str(dlc_cfg.get("bodypart", "center"))
+    backend = _normalize_backend(dlc_cfg.get("backend", "auto"))
     model_path = str(dlc_cfg.get("model_path", "")).strip()
 
     if model_path and Path(model_path).exists():
         try:
-            runtime = DLCLiveRuntime(model_path=model_path, bodypart=bodypart)
+            runtime = DLCLiveRuntime(model_path=model_path, bodypart=bodypart, backend=backend)
             if logger:
-                logger.info("Using DLCLive runtime from %s", model_path)
+                logger.info("Using DLCLive runtime from %s (backend=%s)", model_path, backend)
             return runtime
         except Exception:
             if logger:
@@ -168,3 +182,29 @@ def _select_bodypart(pose: np.ndarray, bodyparts: List[str], target: str) -> tup
             return x, y, p, "nose_tailbase_midpoint"
 
     return pick(0, bodyparts[0] if bodyparts else "index0")
+
+
+def _normalize_backend(value: Any) -> str:
+    text = str(value or "auto").strip().lower()
+    if text in {"pytorch", "torch"}:
+        return "pytorch"
+    if text in {"tensorflow", "tf"}:
+        return "tensorflow"
+    return "auto"
+
+
+def _resolve_model_type_value(backend: str) -> Any:
+    if backend == "auto":
+        return None
+
+    try:
+        from dlclive.enums import PoseEstimationModelType  # type: ignore
+
+        enum_name = "PYTORCH" if backend == "pytorch" else "TENSORFLOW"
+        if hasattr(PoseEstimationModelType, enum_name):
+            return getattr(PoseEstimationModelType, enum_name)
+    except Exception:
+        pass
+
+    # Fallback for dlclive builds that accept string model type.
+    return backend
