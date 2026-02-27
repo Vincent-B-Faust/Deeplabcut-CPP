@@ -1,0 +1,2 @@
+-r base.txt
+nidaqmx>=0.8

@@ -1,0 +1,2 @@
+-r base.txt
+deeplabcut-live>=1.0.0

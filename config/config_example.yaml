@@ -1,0 +1,57 @@
+project:
+  name: "cpp_dlc_live"
+  session_id: "auto_timestamp"
+  out_dir: "./data"
+
+camera:
+  source: 0
+  width: 1280
+  height: 720
+  fps_target: 30
+  flip: false
+  rotate_deg: 0
+
+dlc:
+  model_path: "./models/exported_dlc_live_model"
+  bodypart: "center"
+  p_thresh: 0.6
+  smoothing:
+    enabled: true
+    window: 5
+
+roi:
+  type: "polygon"
+  chamber1:
+    - [50, 50]
+    - [600, 50]
+    - [600, 650]
+    - [50, 650]
+  chamber2:
+    - [680, 50]
+    - [1230, 50]
+    - [1230, 650]
+    - [680, 650]
+  neutral:
+    - [610, 50]
+    - [670, 50]
+    - [670, 650]
+    - [610, 650]
+  strategy_on_neutral: "off"
+  debounce_frames: 8
+
+laser_control:
+  enabled: true
+  mode: "dryrun"
+  freq_hz: 20.0
+  duty_cycle: 0.05
+  ctr_channel: "cDAQ1Mod4/ctr0"
+  pulse_term: "/cDAQ1Mod4/PFI0"
+  enable_line: "cDAQ1Mod4/port0/line0"
+  min_on_s: 0.2
+  min_off_s: 0.2
+  unknown_policy: "off"
+  fallback_to_dryrun: true
+
+analysis:
+  cm_per_px: null
+  output_plots: true

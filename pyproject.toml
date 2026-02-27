@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cpp-dlc-live"
+version = "0.1.0"
+description = "DeepLabCut-live closed-loop 2-chamber CPP with NI cDAQ and offline analysis"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+  "numpy>=1.23",
+  "pandas>=1.5",
+  "opencv-python>=4.8",
+  "PyYAML>=6.0",
+  "matplotlib>=3.7",
+]
+
+[project.optional-dependencies]
+ni = ["nidaqmx>=0.8"]
+dlc = ["deeplabcut-live>=1.0.0"]
+dev = ["pytest>=7.0"]
+
+[project.scripts]
+cpp-dlc-live = "cpp_dlc_live.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["cpp_dlc_live*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-q"
+pythonpath = ["."]

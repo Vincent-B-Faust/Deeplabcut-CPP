@@ -1,0 +1,11 @@
+# Locked dependency baseline for Python 3.10 (CPU, cross-device deployment)
+# Update this file when changing major package versions.
+
+numpy==1.26.4
+pandas==2.2.3
+opencv-python==4.10.0.84
+PyYAML==6.0.2
+matplotlib==3.9.2
+nidaqmx==1.4.1
+deeplabcut-live==1.1.0
+pytest==8.3.5
