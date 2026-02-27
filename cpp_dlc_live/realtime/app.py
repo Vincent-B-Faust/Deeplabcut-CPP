@@ -213,6 +213,7 @@ class RealtimeApp:
                     raise RuntimeError("Camera stream ended or frame read failed")
 
                 t_wall = time.time()
+                elapsed_s = max(0.0, t_wall - start_wall)
 
                 infer_t0 = time.perf_counter()
                 pose = runtime.infer(frame)
@@ -346,6 +347,7 @@ class RealtimeApp:
                 last_context = {
                     "frame_idx": frame_idx,
                     "t_wall": t_wall,
+                    "elapsed_s": elapsed_s,
                     "x": x,
                     "y": y,
                     "p": float(pose.p),
@@ -409,6 +411,7 @@ class RealtimeApp:
                         laser_state=laser_state,
                         fps_est=fps_est,
                         inference_ms=inference_ms,
+                        elapsed_s=elapsed_s,
                     )
 
                 if preview_record_enabled:
@@ -685,6 +688,7 @@ class RealtimeApp:
         laser_state: int,
         fps_est: float,
         inference_ms: float,
+        elapsed_s: float,
     ) -> np.ndarray:
         vis = roi.draw(frame)
         if math.isfinite(x) and math.isfinite(y):
@@ -694,6 +698,15 @@ class RealtimeApp:
         cv2.putText(vis, f"laser: {laser_state}", (10, 52), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
         cv2.putText(vis, f"fps: {fps_est:.1f}", (10, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
         cv2.putText(vis, f"infer_ms: {inference_ms:.1f}", (10, 108), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+        cv2.putText(
+            vis,
+            f"time: {RealtimeApp._format_elapsed_hhmmss(elapsed_s)}",
+            (10, 136),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.7,
+            (255, 255, 255),
+            2,
+        )
         return vis
 
     def _resolve_preview_video_path(self, filename: str) -> Path:
@@ -701,6 +714,16 @@ class RealtimeApp:
         if path.is_absolute():
             return path
         return self.session_dir / path
+
+    @staticmethod
+    def _format_elapsed_hhmmss(seconds: float) -> str:
+        safe = max(0.0, float(seconds))
+        total_ms = int(safe * 1000.0)
+        hours = total_ms // (3600 * 1000)
+        minutes = (total_ms % (3600 * 1000)) // (60 * 1000)
+        secs = (total_ms % (60 * 1000)) // 1000
+        millis = total_ms % 1000
+        return f"{hours:02d}:{minutes:02d}:{secs:02d}.{millis:03d}"
 
     def _write_incident_report(
         self,
