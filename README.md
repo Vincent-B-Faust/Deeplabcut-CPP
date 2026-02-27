@@ -163,6 +163,7 @@ Main sections:
 - `roi`: chamber1/chamber2/neutral polygons or rectangles, neutral strategy, debounce.
 - `laser_control`: `enabled`, mode (`gated`/`startstop`/`dryrun`), channels and timing.
 - `analysis`: `cm_per_px`, plot output toggle.
+- `preview_recording`: optional recording of realtime preview video.
 - `runtime_logging`: runtime issue/heartbeat/perf warning logging controls.
 
 Field reference:
@@ -197,6 +198,11 @@ Field reference:
 - `laser_control.fallback_to_dryrun`: auto-fallback to dryrun when NI init fails.
 - `analysis.cm_per_px`: calibration scale for cm metrics (optional).
 - `analysis.output_plots`: enable trajectory/speed/occupancy plots.
+- `preview_recording.enabled`: enable saving preview video to file.
+- `preview_recording.filename`: output filename (relative path is resolved under session directory).
+- `preview_recording.codec`: OpenCV 4-char codec (example `mp4v`).
+- `preview_recording.fps`: optional override fps for writer (uses camera fps/target if null).
+- `preview_recording.overlay`: save overlay frame (`true`) or raw frame (`false`).
 - `runtime_logging.enabled`: enable structured issue event logging.
 - `runtime_logging.issue_events_file`: structured issue log filename (JSONL).
 - `runtime_logging.heartbeat_interval_s`: heartbeat logging interval.
@@ -231,6 +237,9 @@ Common options:
 - `--duration_s 600`
 - `--camera_source 0` (or video file/stream URL)
 - `--no_preview`
+
+Tip:
+- Preview recording is configured in YAML via `preview_recording.*` and can run even with `--no_preview`.
 
 ### 2) Analyze a session
 
@@ -274,6 +283,7 @@ Each session directory contains:
 - `metadata.json`
 - `config_used.yaml`
 - `run.log`
+- `preview_overlay.mp4` (if `preview_recording.enabled=true`, filename configurable)
 - `issue_events.jsonl` (if `runtime_logging.enabled=true`)
 - `incident_report_*.json` (on runtime exceptions)
 - `issue_summary.csv`, `issue_timeline.csv`, `incident_summary.csv` after `analyze_issues`

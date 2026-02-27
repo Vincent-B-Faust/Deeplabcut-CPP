@@ -59,7 +59,8 @@
 7. chamber -> desired laser state。
 8. 调控制器 `set_state`。
 9. 记录日志行 + 问题事件（状态切换/告警/心跳）。
-10. 预览叠加并处理退出按键。
+10. 按配置可选写出预览视频（支持叠加层或原始帧）。
+11. 预览叠加并处理退出按键。
 
 异常路径：
 
@@ -152,6 +153,7 @@
 3. 运行时必须复制 `config_used.yaml` 到 session。
 4. `metadata.json` 必须记录配置 hash 与关键运行参数。
 5. `runtime_logging` 控制事件日志频率与告警阈值。
+6. `preview_recording` 控制预览视频录制（开关、编码器、fps、是否叠加）。
 
 ## 8. 测试策略
 

@@ -82,6 +82,14 @@ python -m cpp_dlc_live.cli --help
 5. `inference_warn_ms`：推理耗时告警阈值。
 6. `fps_warn_below`：低 FPS 告警阈值。
 
+## 3.7 `preview_recording`（可选录制预览视频）
+
+1. `enabled=true`：保存预览视频到 session 目录。
+2. `filename`：视频文件名（默认 `preview_overlay.mp4`）。
+3. `codec`：OpenCV FourCC（默认 `mp4v`）。
+4. `fps`：写出帧率，留空会自动用相机 FPS/目标 FPS。
+5. `overlay=true`：保存带 ROI/状态叠加的视频；`false` 保存原始帧。
+
 ## 4. 四条命令怎么用
 
 ## 4.1 ROI 标定（先做）
@@ -112,6 +120,7 @@ python -m cpp_dlc_live.cli run_realtime \
 1. `--out_dir`：覆盖输出目录。
 2. `--camera_source`：覆盖相机/视频来源。
 3. `--no_preview`：无显示环境时关闭窗口。
+4. 即使 `--no_preview`，只要 `preview_recording.enabled=true` 仍会保存视频。
 
 结束方式：
 1. 预览窗口按 `q` 或 `Esc`。
@@ -185,12 +194,13 @@ python -m cpp_dlc_live.cli analyze_issues \
 2. `metadata.json`：实验元数据。
 3. `config_used.yaml`：当次配置快照。
 4. `run.log`：运行日志。
-5. `issue_events.jsonl`：结构化问题日志（事件流）。
-6. `incident_report_*.json`：异常报告（发生异常时生成）。
-7. `summary.csv`：离线统计结果。
-8. `issue_summary.csv`：问题事件计数汇总（执行 `analyze_issues` 后生成）。
-9. `issue_timeline.csv`：问题时间线（执行 `analyze_issues` 后生成）。
-10. `incident_summary.csv`：异常摘要（执行 `analyze_issues` 后生成）。
+5. `preview_overlay.mp4`：预览视频（开启 `preview_recording` 时生成，文件名可配置）。
+6. `issue_events.jsonl`：结构化问题日志（事件流）。
+7. `incident_report_*.json`：异常报告（发生异常时生成）。
+8. `summary.csv`：离线统计结果。
+9. `issue_summary.csv`：问题事件计数汇总（执行 `analyze_issues` 后生成）。
+10. `issue_timeline.csv`：问题时间线（执行 `analyze_issues` 后生成）。
+11. `incident_summary.csv`：异常摘要（执行 `analyze_issues` 后生成）。
 
 ## 6.1 `summary.csv` 核心字段
 

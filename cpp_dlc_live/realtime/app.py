@@ -48,6 +48,7 @@ class RealtimeApp:
         controller: Optional[LaserControllerBase] = None
         recorder: Optional[CSVRecorder] = None
         issue_logger: Optional[SessionIssueLogger] = None
+        preview_writer: Optional[cv2.VideoWriter] = None
 
         frame_idx = 0
         processed_frames = 0
@@ -55,6 +56,9 @@ class RealtimeApp:
         chamber_transition_count = 0
         laser_transition_count = 0
         warning_count = 0
+        preview_frames_written = 0
+        preview_writer_opened = False
+        preview_video_path: Optional[Path] = None
         last_context: Dict[str, Any] = {}
         previous_chamber = "unknown"
         previous_laser_state = 0
@@ -90,6 +94,33 @@ class RealtimeApp:
             "inference_warn_ms": inference_warn_ms,
             "fps_warn_below": fps_warn_below,
         }
+
+        raw_preview_record_cfg = self.config.get("preview_recording", {})
+        preview_record_cfg = (
+            dict(raw_preview_record_cfg)
+            if isinstance(raw_preview_record_cfg, dict)
+            else {}
+        )
+        preview_record_requested = bool(preview_record_cfg.get("enabled", False))
+        preview_record_enabled = preview_record_requested
+        preview_filename = str(preview_record_cfg.get("filename", "preview_overlay.mp4"))
+        preview_codec_raw = str(preview_record_cfg.get("codec", "mp4v")).strip()
+        preview_codec = preview_codec_raw if len(preview_codec_raw) == 4 else "mp4v"
+        preview_fps_override = _optional_float(preview_record_cfg.get("fps"))
+        preview_overlay = bool(preview_record_cfg.get("overlay", True))
+        metadata["preview_recording"] = {
+            "enabled_requested": preview_record_requested,
+            "filename": preview_filename,
+            "codec": preview_codec,
+            "fps_override": preview_fps_override,
+            "overlay": preview_overlay,
+        }
+        if preview_codec != preview_codec_raw:
+            self.logger.warning(
+                "Invalid preview_recording.codec=%r, fallback to 'mp4v'",
+                preview_codec_raw,
+            )
+
         try:
             issue_logger = SessionIssueLogger(self.session_dir / issue_events_file, enabled=issue_enabled)
         except Exception:
@@ -100,11 +131,13 @@ class RealtimeApp:
             level="INFO",
             duration_s=self.duration_s,
             preview=self.preview,
+            preview_recording_requested=preview_record_requested,
             camera_source_override=self.camera_source_override,
         )
 
         try:
             camera = self._create_camera()
+            camera_info = camera.camera_info()
             runtime = build_runtime(self.config.get("dlc", {}), logger=self.logger)
             roi = ChamberROI.from_config(self.config.get("roi", {}))
             debouncer = Debouncer(
@@ -136,16 +169,17 @@ class RealtimeApp:
             issue_logger.log(
                 "runtime_ready",
                 level="INFO",
-                camera=camera.camera_info(),
+                camera=camera_info,
                 dlc_model=runtime.model_info(),
                 laser_mode=laser_cfg.get("mode", "dryrun"),
                 fallback_to_dryrun=laser_cfg.get("fallback_to_dryrun", True),
                 debounce_frames=self.config.get("roi", {}).get("debounce_frames", 8),
+                preview_recording_requested=preview_record_requested,
             )
 
             metadata.update(
                 {
-                    "camera": camera.camera_info(),
+                    "camera": camera_info,
                     "dlc_model": runtime.model_info(),
                     "daq": dict(laser_cfg),
                     "roi": roi.to_dict(),
@@ -361,11 +395,12 @@ class RealtimeApp:
                             frame_idx=frame_idx,
                             fps_est=fps_est,
                             threshold_fps=fps_warn_below,
-                        )
+                    )
                     last_heartbeat_monotonic = now_monotonic
 
-                if self.preview:
-                    self._preview_frame(
+                overlay_frame: Optional[np.ndarray] = None
+                if self.preview or (preview_record_enabled and preview_overlay):
+                    overlay_frame = self._render_preview_frame(
                         frame=frame,
                         roi=roi,
                         x=x,
@@ -375,6 +410,76 @@ class RealtimeApp:
                         fps_est=fps_est,
                         inference_ms=inference_ms,
                     )
+
+                if preview_record_enabled:
+                    frame_to_write = overlay_frame if preview_overlay and overlay_frame is not None else frame
+                    if preview_writer is None:
+                        h, w = frame_to_write.shape[:2]
+                        fps_for_writer = (
+                            preview_fps_override
+                            if preview_fps_override is not None and preview_fps_override > 0
+                            else float(camera_info.get("fps", 0.0))
+                        )
+                        if fps_for_writer <= 0:
+                            fps_cfg = _optional_float(self.config.get("camera", {}).get("fps_target"))
+                            fps_for_writer = fps_cfg if fps_cfg is not None and fps_cfg > 0 else 30.0
+
+                        preview_video_path = self._resolve_preview_video_path(preview_filename)
+                        preview_video_path.parent.mkdir(parents=True, exist_ok=True)
+                        fourcc = cv2.VideoWriter_fourcc(*preview_codec)
+                        candidate = cv2.VideoWriter(
+                            str(preview_video_path),
+                            fourcc,
+                            float(fps_for_writer),
+                            (int(w), int(h)),
+                        )
+                        if not candidate.isOpened():
+                            warning_count += 1
+                            preview_record_enabled = False
+                            candidate.release()
+                            self.logger.warning(
+                                "Failed to open preview writer: %s (codec=%s fps=%.2f)",
+                                preview_video_path,
+                                preview_codec,
+                                fps_for_writer,
+                            )
+                            issue_logger.log(
+                                "preview_video_writer_failed",
+                                level="WARNING",
+                                path=str(preview_video_path),
+                                codec=preview_codec,
+                                fps=fps_for_writer,
+                                width=w,
+                                height=h,
+                            )
+                        else:
+                            preview_writer = candidate
+                            preview_writer_opened = True
+                            metadata["preview_recording"]["resolved_path"] = str(preview_video_path)
+                            metadata["preview_recording"]["fps_actual"] = float(fps_for_writer)
+                            self.logger.info(
+                                "Preview recording started: %s (codec=%s fps=%.2f, overlay=%s)",
+                                preview_video_path,
+                                preview_codec,
+                                fps_for_writer,
+                                preview_overlay,
+                            )
+                            issue_logger.log(
+                                "preview_video_writer_started",
+                                level="INFO",
+                                path=str(preview_video_path),
+                                codec=preview_codec,
+                                fps=fps_for_writer,
+                                width=w,
+                                height=h,
+                                overlay=preview_overlay,
+                            )
+                    if preview_writer is not None:
+                        preview_writer.write(frame_to_write)
+                        preview_frames_written += 1
+
+                if self.preview:
+                    cv2.imshow("cpp_dlc_live", overlay_frame if overlay_frame is not None else frame)
                     key = cv2.waitKey(1) & 0xFF
                     if key in (ord("q"), 27):
                         self.logger.info("Preview exit key pressed")
@@ -415,6 +520,18 @@ class RealtimeApp:
             if recorder is not None:
                 recorder.close()
 
+            if preview_writer is not None:
+                try:
+                    preview_writer.release()
+                except Exception:
+                    self.logger.exception("Failed to close preview video writer")
+                if preview_video_path is not None:
+                    self.logger.info(
+                        "Preview recording saved: %s (frames=%d)",
+                        preview_video_path,
+                        preview_frames_written,
+                    )
+
             if controller is not None:
                 try:
                     controller.set_state(False)
@@ -448,6 +565,14 @@ class RealtimeApp:
                         "laser_transitions": laser_transition_count,
                         "warnings": warning_count,
                         "issue_events_file": issue_events_file if issue_enabled else None,
+                        "preview_frames_written": preview_frames_written,
+                    },
+                    "preview_recording_result": {
+                        "enabled_requested": preview_record_requested,
+                        "enabled_effective": preview_record_enabled or preview_writer_opened,
+                        "writer_opened": preview_writer_opened,
+                        "resolved_path": str(preview_video_path) if preview_video_path is not None else None,
+                        "frames_written": preview_frames_written,
                     },
                     "last_context": last_context,
                 }
@@ -551,7 +676,7 @@ class RealtimeApp:
         return float((len(timestamps) - 1) / dt)
 
     @staticmethod
-    def _preview_frame(
+    def _render_preview_frame(
         frame: np.ndarray,
         roi: ChamberROI,
         x: float,
@@ -560,7 +685,7 @@ class RealtimeApp:
         laser_state: int,
         fps_est: float,
         inference_ms: float,
-    ) -> None:
+    ) -> np.ndarray:
         vis = roi.draw(frame)
         if math.isfinite(x) and math.isfinite(y):
             cv2.circle(vis, (int(x), int(y)), 5, (255, 255, 255), -1)
@@ -569,7 +694,13 @@ class RealtimeApp:
         cv2.putText(vis, f"laser: {laser_state}", (10, 52), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
         cv2.putText(vis, f"fps: {fps_est:.1f}", (10, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
         cv2.putText(vis, f"infer_ms: {inference_ms:.1f}", (10, 108), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-        cv2.imshow("cpp_dlc_live", vis)
+        return vis
+
+    def _resolve_preview_video_path(self, filename: str) -> Path:
+        path = Path(str(filename))
+        if path.is_absolute():
+            return path
+        return self.session_dir / path
 
     def _write_incident_report(
         self,
