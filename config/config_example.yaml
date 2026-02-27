@@ -1,65 +1,85 @@
 project:
-  name: "cpp_dlc_live"
-  session_id: "auto_timestamp"
-  out_dir: "./data"
-
+  name: cpp_dlc_live
+  session_id: auto_timestamp
+  out_dir: D:/data/LiuZY/deeplabcut_cpp/dryrun_test_output
 camera:
-  source: 0
+  source: C:/Users/admin/Downloads/Trial_11_7381.avi
   width: 1280
   height: 720
   fps_target: 30
   flip: false
   rotate_deg: 0
-
 dlc:
-  model_path: "./models/exported_dlc_live_model"
-  backend: "auto"  # auto | pytorch | tensorflow
-  bodypart: "center"
+  model_path: C:\Users\admin\Desktop\RTPPTest-liu-2026-02-27\exported-models-pytorch\DLC_RTPPTest_resnet_50_iteration-0_shuffle-1\DLC_RTPPTest_resnet_50_iteration-0_shuffle-1_snapshot-best-10.pt
+  backend: 'pytorch'
+  bodypart: Mouse
   p_thresh: 0.6
   smoothing:
     enabled: true
     window: 5
-
 roi:
-  type: "polygon"
+  type: polygon
   chamber1:
-    - [50, 50]
-    - [600, 50]
-    - [600, 650]
-    - [50, 650]
+  - - 173
+    - 73
+  - - 170
+    - 130
+  - - 113
+    - 133
+  - - 116
+    - 356
+  - - 331
+    - 354
+  - - 339
+    - 75
+  - - 173
+    - 76
   chamber2:
-    - [680, 50]
-    - [1230, 50]
-    - [1230, 650]
-    - [680, 650]
+  - - 342
+    - 80
+  - - 334
+    - 351
+  - - 488
+    - 359
+  - - 486
+    - 303
+  - - 552
+    - 302
+  - - 555
+    - 78
+  - - 342
+    - 77
   neutral:
-    - [610, 50]
-    - [670, 50]
-    - [670, 650]
-    - [610, 650]
-  strategy_on_neutral: "off"
+  - - 173
+    - 74
+  - - 559
+    - 78
+  - - 639
+    - 7
+  - - 2
+    - 2
+  - - 175
+    - 75
+  strategy_on_neutral: 'off'
   debounce_frames: 8
-
 laser_control:
   enabled: true
-  mode: "dryrun"
+  mode: dryrun
   freq_hz: 20.0
   duty_cycle: 0.05
-  ctr_channel: "cDAQ1Mod4/ctr0"
-  pulse_term: "/cDAQ1Mod4/PFI0"
-  enable_line: "cDAQ1Mod4/port0/line0"
+  ctr_channel: cDAQ1Mod4/ctr0
+  pulse_term: /cDAQ1Mod4/PFI0
+  enable_line: cDAQ1Mod4/port0/line0
   min_on_s: 0.2
   min_off_s: 0.2
-  unknown_policy: "off"
+  unknown_policy: 'off'
   fallback_to_dryrun: true
-
 analysis:
   cm_per_px: null
   output_plots: true
-
 runtime_logging:
   enabled: true
-  issue_events_file: "issue_events.jsonl"
+  issue_events_file: issue_events.jsonl
   heartbeat_interval_s: 5.0
   low_conf_warn_every_n: 30
   inference_warn_ms: 80.0
