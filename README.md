@@ -3,6 +3,7 @@
 End-to-end Python project for DeepLabCut-live closed-loop 2-chamber CPP experiments with NI cDAQ laser control and offline analysis.
 
 For multi-device deployment (pip/conda/docker/locked requirements), see `DEPLOYMENT_REQUIREMENTS.md`.
+For Chinese guides: `docs/operator_guide_zh.md` (operator) and `docs/developer_guide_zh.md` (developer).
 
 ## Features
 
@@ -69,6 +70,7 @@ cpp_dlc_live/
       app.py
     analysis/
       analyze.py
+      issues.py
       plots.py
       metrics.py
     utils/
@@ -78,6 +80,7 @@ cpp_dlc_live/
     test_roi.py
     test_debounce.py
     test_analysis_metrics.py
+    test_issue_analysis.py
 ```
 
 ## Installation
@@ -160,6 +163,7 @@ Main sections:
 - `roi`: chamber1/chamber2/neutral polygons or rectangles, neutral strategy, debounce.
 - `laser_control`: `enabled`, mode (`gated`/`startstop`/`dryrun`), channels and timing.
 - `analysis`: `cm_per_px`, plot output toggle.
+- `runtime_logging`: runtime issue/heartbeat/perf warning logging controls.
 
 Field reference:
 
@@ -192,6 +196,12 @@ Field reference:
 - `laser_control.fallback_to_dryrun`: auto-fallback to dryrun when NI init fails.
 - `analysis.cm_per_px`: calibration scale for cm metrics (optional).
 - `analysis.output_plots`: enable trajectory/speed/occupancy plots.
+- `runtime_logging.enabled`: enable structured issue event logging.
+- `runtime_logging.issue_events_file`: structured issue log filename (JSONL).
+- `runtime_logging.heartbeat_interval_s`: heartbeat logging interval.
+- `runtime_logging.low_conf_warn_every_n`: periodic warning interval for low-confidence frames.
+- `runtime_logging.inference_warn_ms`: warning threshold for slow inference.
+- `runtime_logging.fps_warn_below`: warning threshold for low FPS.
 
 ## DeepLabCut-live Model
 
@@ -231,7 +241,21 @@ Options:
 - `--cm_per_px 0.05` (override config)
 - `--no_plots`
 
-### 3) Calibrate ROI interactively
+### 3) Analyze runtime issues for traceback
+
+```bash
+cpp-dlc-live analyze_issues --session_dir data/session_20260226_120000
+```
+
+Options:
+- `--issue_file custom_issue_events.jsonl` (absolute path or relative to `session_dir`)
+
+Outputs:
+- `issue_summary.csv`: event count by event/level with first/last timestamp and frame.
+- `issue_timeline.csv`: normalized event timeline.
+- `incident_summary.csv`: parsed `incident_report_*.json` summary.
+
+### 4) Calibrate ROI interactively
 
 ```bash
 cpp-dlc-live calibrate_roi --config config/config_example.yaml --camera_source 0
@@ -249,6 +273,9 @@ Each session directory contains:
 - `metadata.json`
 - `config_used.yaml`
 - `run.log`
+- `issue_events.jsonl` (if `runtime_logging.enabled=true`)
+- `incident_report_*.json` (on runtime exceptions)
+- `issue_summary.csv`, `issue_timeline.csv`, `incident_summary.csv` after `analyze_issues`
 - `summary.csv` and plot files after offline analysis
 
 Notes:

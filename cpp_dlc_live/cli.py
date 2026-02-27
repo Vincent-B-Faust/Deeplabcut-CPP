@@ -8,6 +8,7 @@ from typing import Any, Dict, Optional, Union
 import cv2
 
 from cpp_dlc_live.analysis.analyze import analyze_session
+from cpp_dlc_live.analysis.issues import analyze_issues
 from cpp_dlc_live.realtime.app import RealtimeApp
 from cpp_dlc_live.realtime.camera import CameraConfig, CameraStream
 from cpp_dlc_live.realtime.logging_utils import setup_logging
@@ -24,6 +25,9 @@ def main(argv: Optional[list[str]] = None) -> None:
         return
     if args.command == "analyze_session":
         _cmd_analyze_session(args)
+        return
+    if args.command == "analyze_issues":
+        _cmd_analyze_issues(args)
         return
     if args.command == "calibrate_roi":
         _cmd_calibrate_roi(args)
@@ -47,6 +51,14 @@ def _build_parser() -> argparse.ArgumentParser:
     p_an.add_argument("--session_dir", required=True, help="Path to session directory")
     p_an.add_argument("--cm_per_px", type=float, default=None, help="Override cm_per_px")
     p_an.add_argument("--no_plots", action="store_true", help="Disable plot output")
+
+    p_issues = sub.add_parser("analyze_issues", help="Analyze issue events and incident reports")
+    p_issues.add_argument("--session_dir", required=True, help="Path to session directory")
+    p_issues.add_argument(
+        "--issue_file",
+        default=None,
+        help="Optional issue events JSONL path (absolute or relative to session_dir)",
+    )
 
     p_cal = sub.add_parser("calibrate_roi", help="Interactive ROI calibrator")
     p_cal.add_argument("--config", required=True, help="Config YAML to load/update")
@@ -98,6 +110,19 @@ def _cmd_analyze_session(args: argparse.Namespace) -> None:
         logger=logger,
     )
     print(summary_path)
+
+
+def _cmd_analyze_issues(args: argparse.Namespace) -> None:
+    session_dir = Path(args.session_dir)
+    logger = setup_logging(session_dir)
+    outputs = analyze_issues(
+        session_dir=session_dir,
+        issue_file_override=args.issue_file,
+        logger=logger,
+    )
+    print(outputs["issue_summary"])
+    print(outputs["issue_timeline"])
+    print(outputs["incident_summary"])
 
 
 def _cmd_calibrate_roi(args: argparse.Namespace) -> None:

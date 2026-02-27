@@ -55,3 +55,11 @@ laser_control:
 analysis:
   cm_per_px: null
   output_plots: true
+
+runtime_logging:
+  enabled: true
+  issue_events_file: "issue_events.jsonl"
+  heartbeat_interval_s: 5.0
+  low_conf_warn_every_n: 30
+  inference_warn_ms: 80.0
+  fps_warn_below: 10.0

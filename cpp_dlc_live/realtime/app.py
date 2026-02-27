@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import math
 import time
+import traceback
 from collections import deque
 from pathlib import Path
 from typing import Any, Deque, Dict, Optional, Tuple, Union
@@ -15,6 +16,7 @@ from cpp_dlc_live.realtime.controller_base import LaserControllerBase
 from cpp_dlc_live.realtime.controller_ni import DryRunLaserController, LaserControllerError, create_laser_controller
 from cpp_dlc_live.realtime.debounce import Debouncer
 from cpp_dlc_live.realtime.dlc_runtime import RuntimeBase, build_runtime
+from cpp_dlc_live.realtime.issue_logger import SessionIssueLogger
 from cpp_dlc_live.realtime.recorder import CSVRecorder
 from cpp_dlc_live.realtime.roi import ChamberROI
 from cpp_dlc_live.utils.io_utils import file_sha256, save_json
@@ -45,6 +47,17 @@ class RealtimeApp:
         roi: Optional[ChamberROI] = None
         controller: Optional[LaserControllerBase] = None
         recorder: Optional[CSVRecorder] = None
+        issue_logger: Optional[SessionIssueLogger] = None
+
+        frame_idx = 0
+        processed_frames = 0
+        low_confidence_frames = 0
+        chamber_transition_count = 0
+        laser_transition_count = 0
+        warning_count = 0
+        last_context: Dict[str, Any] = {}
+        previous_chamber = "unknown"
+        previous_laser_state = 0
 
         status_code = 0
         start_wall = time.time()
@@ -60,6 +73,35 @@ class RealtimeApp:
         if cfg_used.exists():
             metadata["config_copy"] = str(cfg_used)
             metadata["config_sha256"] = file_sha256(cfg_used)
+
+        raw_runtime_log_cfg = self.config.get("runtime_logging", {})
+        runtime_log_cfg = dict(raw_runtime_log_cfg) if isinstance(raw_runtime_log_cfg, dict) else {}
+        issue_enabled = bool(runtime_log_cfg.get("enabled", True))
+        issue_events_file = str(runtime_log_cfg.get("issue_events_file", "issue_events.jsonl"))
+        heartbeat_interval_s = max(0.0, float(runtime_log_cfg.get("heartbeat_interval_s", 5.0)))
+        low_conf_warn_every_n = max(1, int(runtime_log_cfg.get("low_conf_warn_every_n", 30)))
+        inference_warn_ms = float(runtime_log_cfg.get("inference_warn_ms", 80.0))
+        fps_warn_below = float(runtime_log_cfg.get("fps_warn_below", 10.0))
+        metadata["runtime_logging"] = {
+            "enabled": issue_enabled,
+            "issue_events_file": issue_events_file,
+            "heartbeat_interval_s": heartbeat_interval_s,
+            "low_conf_warn_every_n": low_conf_warn_every_n,
+            "inference_warn_ms": inference_warn_ms,
+            "fps_warn_below": fps_warn_below,
+        }
+        try:
+            issue_logger = SessionIssueLogger(self.session_dir / issue_events_file, enabled=issue_enabled)
+        except Exception:
+            self.logger.exception("Failed to initialize structured issue logger, continuing without it")
+            issue_logger = SessionIssueLogger(self.session_dir / issue_events_file, enabled=False)
+        issue_logger.log(
+            "session_start",
+            level="INFO",
+            duration_s=self.duration_s,
+            preview=self.preview,
+            camera_source_override=self.camera_source_override,
+        )
 
         try:
             camera = self._create_camera()
@@ -89,6 +131,17 @@ class RealtimeApp:
 
             laser_cfg = self.config.get("laser_control", {})
             controller = self._create_and_start_controller(laser_cfg)
+            previous_laser_state = 1 if controller.current_state else 0
+
+            issue_logger.log(
+                "runtime_ready",
+                level="INFO",
+                camera=camera.camera_info(),
+                dlc_model=runtime.model_info(),
+                laser_mode=laser_cfg.get("mode", "dryrun"),
+                fallback_to_dryrun=laser_cfg.get("fallback_to_dryrun", True),
+                debounce_frames=self.config.get("roi", {}).get("debounce_frames", 8),
+            )
 
             metadata.update(
                 {
@@ -101,10 +154,11 @@ class RealtimeApp:
             )
 
             timestamps: Deque[float] = deque(maxlen=60)
+            inference_ms_window: Deque[float] = deque(maxlen=120)
+            last_heartbeat_monotonic = time.monotonic()
             smooth_window = max(1, int(self.config.get("dlc", {}).get("smoothing", {}).get("window", 5)))
             smooth_enabled = bool(self.config.get("dlc", {}).get("smoothing", {}).get("enabled", False))
             smooth_points: Deque[Tuple[float, float]] = deque(maxlen=smooth_window)
-            frame_idx = 0
             last_valid_xy: Optional[Tuple[float, float]] = None
             last_non_neutral = "unknown"
             p_thresh = float(self.config.get("dlc", {}).get("p_thresh", 0.6))
@@ -129,14 +183,35 @@ class RealtimeApp:
                 infer_t0 = time.perf_counter()
                 pose = runtime.infer(frame)
                 inference_ms = (time.perf_counter() - infer_t0) * 1000.0
+                inference_ms_window.append(inference_ms)
 
                 if pose.p >= p_thresh:
                     x, y = pose.x, pose.y
                     last_valid_xy = (x, y)
-                elif last_valid_xy is not None:
-                    x, y = last_valid_xy
                 else:
-                    x, y = float("nan"), float("nan")
+                    low_confidence_frames += 1
+                    if last_valid_xy is not None:
+                        x, y = last_valid_xy
+                    else:
+                        x, y = float("nan"), float("nan")
+                    if low_confidence_frames == 1 or (low_confidence_frames % low_conf_warn_every_n) == 0:
+                        warning_count += 1
+                        action = "hold_last_valid" if last_valid_xy is not None else "no_valid_position"
+                        self.logger.warning(
+                            "Low confidence frame: p=%.3f < %.3f (frame=%d, action=%s)",
+                            pose.p,
+                            p_thresh,
+                            frame_idx,
+                            action,
+                        )
+                        issue_logger.log(
+                            "low_confidence",
+                            level="WARNING",
+                            frame_idx=frame_idx,
+                            p=float(pose.p),
+                            p_thresh=p_thresh,
+                            action=action,
+                        )
 
                 if math.isfinite(x) and math.isfinite(y):
                     smooth_points.append((x, y))
@@ -151,15 +226,73 @@ class RealtimeApp:
 
                 chamber_candidate = self._map_neutral_candidate(chamber_raw, last_non_neutral)
                 chamber = debouncer.update(chamber_candidate)
+                if chamber != previous_chamber:
+                    chamber_transition_count += 1
+                    self.logger.info(
+                        "Stable chamber transition: %s -> %s (frame=%d, raw=%s)",
+                        previous_chamber,
+                        chamber,
+                        frame_idx,
+                        chamber_raw,
+                    )
+                    issue_logger.log(
+                        "chamber_transition",
+                        level="INFO",
+                        frame_idx=frame_idx,
+                        from_chamber=previous_chamber,
+                        to_chamber=chamber,
+                        chamber_raw=chamber_raw,
+                        x=x,
+                        y=y,
+                        p=float(pose.p),
+                    )
+                    previous_chamber = chamber
                 if chamber in {"chamber1", "chamber2"}:
                     last_non_neutral = chamber
 
                 desired_laser_on = self._resolve_laser_target(chamber, last_non_neutral)
                 controller.set_state(desired_laser_on)
                 laser_state = 1 if controller.current_state else 0
+                if laser_state != previous_laser_state:
+                    laser_transition_count += 1
+                    self.logger.info(
+                        "Laser transition: %d -> %d (frame=%d, chamber=%s, desired=%d)",
+                        previous_laser_state,
+                        laser_state,
+                        frame_idx,
+                        chamber,
+                        int(bool(desired_laser_on)),
+                    )
+                    issue_logger.log(
+                        "laser_transition",
+                        level="INFO",
+                        frame_idx=frame_idx,
+                        from_state=previous_laser_state,
+                        to_state=laser_state,
+                        desired_state=int(bool(desired_laser_on)),
+                        chamber=chamber,
+                    )
+                    previous_laser_state = laser_state
 
                 timestamps.append(time.perf_counter())
                 fps_est = self._estimate_fps(timestamps)
+
+                if inference_warn_ms > 0 and inference_ms >= inference_warn_ms:
+                    warning_count += 1
+                    self.logger.warning(
+                        "High inference latency: %.2f ms >= %.2f ms (frame=%d)",
+                        inference_ms,
+                        inference_warn_ms,
+                        frame_idx,
+                    )
+                    issue_logger.log(
+                        "inference_latency_warning",
+                        level="WARNING",
+                        frame_idx=frame_idx,
+                        inference_ms=inference_ms,
+                        threshold_ms=inference_warn_ms,
+                        fps_est=fps_est,
+                    )
 
                 recorder.write_row(
                     {
@@ -175,6 +308,61 @@ class RealtimeApp:
                         "fps_est": fps_est,
                     }
                 )
+                processed_frames += 1
+                last_context = {
+                    "frame_idx": frame_idx,
+                    "t_wall": t_wall,
+                    "x": x,
+                    "y": y,
+                    "p": float(pose.p),
+                    "chamber_raw": chamber_raw,
+                    "chamber": chamber,
+                    "laser_state": laser_state,
+                    "desired_laser_state": int(bool(desired_laser_on)),
+                    "inference_ms": inference_ms,
+                    "fps_est": fps_est,
+                }
+
+                now_monotonic = time.monotonic()
+                if heartbeat_interval_s > 0 and (now_monotonic - last_heartbeat_monotonic) >= heartbeat_interval_s:
+                    avg_inference_ms = float(np.mean(inference_ms_window)) if inference_ms_window else 0.0
+                    self.logger.info(
+                        "Heartbeat: frame=%d chamber=%s laser=%d fps=%.2f infer_avg=%.2fms low_conf=%d warnings=%d",
+                        frame_idx,
+                        chamber,
+                        laser_state,
+                        fps_est,
+                        avg_inference_ms,
+                        low_confidence_frames,
+                        warning_count,
+                    )
+                    issue_logger.log(
+                        "heartbeat",
+                        level="INFO",
+                        frame_idx=frame_idx,
+                        chamber=chamber,
+                        laser_state=laser_state,
+                        fps_est=fps_est,
+                        inference_avg_ms=avg_inference_ms,
+                        low_confidence_frames=low_confidence_frames,
+                        warning_count=warning_count,
+                    )
+                    if fps_warn_below > 0 and fps_est > 0 and fps_est < fps_warn_below:
+                        warning_count += 1
+                        self.logger.warning(
+                            "FPS below threshold: %.2f < %.2f (frame=%d)",
+                            fps_est,
+                            fps_warn_below,
+                            frame_idx,
+                        )
+                        issue_logger.log(
+                            "fps_warning",
+                            level="WARNING",
+                            frame_idx=frame_idx,
+                            fps_est=fps_est,
+                            threshold_fps=fps_warn_below,
+                        )
+                    last_heartbeat_monotonic = now_monotonic
 
                 if self.preview:
                     self._preview_frame(
@@ -199,15 +387,24 @@ class RealtimeApp:
         except KeyboardInterrupt:
             status_code = 0
             self.logger.info("Realtime session interrupted by user (Ctrl-C)")
+            issue_logger.log("session_interrupted", level="INFO", last_context=last_context)
             if controller is not None:
                 try:
                     controller.set_state(False)
                 except Exception:
                     self.logger.exception("Failed to force laser OFF on KeyboardInterrupt")
 
-        except Exception:
+        except Exception as exc:
             status_code = 1
             self.logger.exception("Realtime session failed")
+            issue_logger.log(
+                "runtime_exception",
+                level="ERROR",
+                exception_type=type(exc).__name__,
+                exception_message=str(exc),
+                last_context=last_context,
+            )
+            self._write_incident_report(exc, traceback.format_exc(), last_context)
             if controller is not None:
                 try:
                     controller.set_state(False)
@@ -244,10 +441,30 @@ class RealtimeApp:
                     "end_wall": end_wall,
                     "duration_s": max(0.0, end_wall - start_wall),
                     "status_code": status_code,
+                    "runtime_stats": {
+                        "frames_total": processed_frames,
+                        "low_confidence_frames": low_confidence_frames,
+                        "chamber_transitions": chamber_transition_count,
+                        "laser_transitions": laser_transition_count,
+                        "warnings": warning_count,
+                        "issue_events_file": issue_events_file if issue_enabled else None,
+                    },
+                    "last_context": last_context,
                 }
             )
             save_json(metadata, self.session_dir / "metadata.json")
             self.logger.info("Session metadata written: %s", self.session_dir / "metadata.json")
+            if issue_logger is not None:
+                issue_logger.log(
+                    "session_end",
+                    level=("INFO" if status_code == 0 else "ERROR"),
+                    status_code=status_code,
+                    duration_s=max(0.0, end_wall - start_wall),
+                    frames_total=processed_frames,
+                    low_confidence_frames=low_confidence_frames,
+                    warning_count=warning_count,
+                )
+                issue_logger.close()
 
         return status_code
 
@@ -353,6 +570,28 @@ class RealtimeApp:
         cv2.putText(vis, f"fps: {fps_est:.1f}", (10, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
         cv2.putText(vis, f"infer_ms: {inference_ms:.1f}", (10, 108), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
         cv2.imshow("cpp_dlc_live", vis)
+
+    def _write_incident_report(
+        self,
+        exc: BaseException,
+        traceback_text: str,
+        last_context: Dict[str, Any],
+    ) -> None:
+        report = {
+            "time_utc": utc_now_iso(),
+            "exception_type": type(exc).__name__,
+            "exception_message": str(exc),
+            "traceback": traceback_text,
+            "last_context": last_context,
+            "camera_source_override": self.camera_source_override,
+            "session_dir": str(self.session_dir),
+        }
+        path = self.session_dir / f"incident_report_{time.strftime('%Y%m%d_%H%M%S')}.json"
+        try:
+            save_json(report, path)
+            self.logger.error("Incident report written: %s", path)
+        except Exception:
+            self.logger.exception("Failed to write incident report")
 
 
 def _optional_int(v: Any) -> Optional[int]:
