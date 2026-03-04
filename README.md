@@ -239,6 +239,8 @@ Note: always replace any machine-specific paths with your own absolute paths.
 ### `camera`
 - `camera.source`: camera index (`0`) or video path/URL
 - `camera.width`, `camera.height`, `camera.fps_target`
+  - For camera devices, `fps_target` is requested via OpenCV capture settings.
+  - For video-file sources, `fps_target` is also used to throttle playback to realtime speed.
 - `camera.flip`, `camera.rotate_deg`
 
 ### `dlc`
@@ -272,7 +274,8 @@ Note: always replace any machine-specific paths with your own absolute paths.
 - `preview_recording.enabled`: save preview video or not
 - `preview_recording.filename`: relative path is resolved under session dir
 - `preview_recording.codec`: 4-char codec (e.g. `mp4v`)
-- `preview_recording.fps`: optional override
+- `preview_recording.fps`: optional explicit writer FPS override
+  - Writer FPS selection order: `preview_recording.fps` -> `camera.fps_target` -> camera reported FPS -> `30`.
 - `preview_recording.overlay`: save annotated frame (`true`) or raw frame (`false`)
 
 ### `runtime_logging`

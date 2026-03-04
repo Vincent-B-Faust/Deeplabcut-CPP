@@ -186,6 +186,16 @@ class RealtimeApp:
                     "analysis": self.config.get("analysis", {}),
                 }
             )
+            self.logger.info(
+                "Effective camera: source=%s size=%sx%s fps_capture=%.3f fps_target=%s source_is_file=%s file_throttle=%s",
+                camera_info.get("source"),
+                camera_info.get("width"),
+                camera_info.get("height"),
+                float(camera_info.get("fps", 0.0) or 0.0),
+                camera_info.get("fps_target"),
+                camera_info.get("source_is_file"),
+                camera_info.get("file_realtime_throttle"),
+            )
 
             timestamps: Deque[float] = deque(maxlen=60)
             inference_ms_window: Deque[float] = deque(maxlen=120)
@@ -418,14 +428,12 @@ class RealtimeApp:
                     frame_to_write = overlay_frame if preview_overlay and overlay_frame is not None else frame
                     if preview_writer is None:
                         h, w = frame_to_write.shape[:2]
-                        fps_for_writer = (
-                            preview_fps_override
-                            if preview_fps_override is not None and preview_fps_override > 0
-                            else float(camera_info.get("fps", 0.0))
+                        fps_cfg = _optional_float(self.config.get("camera", {}).get("fps_target"))
+                        fps_for_writer, fps_source = self._resolve_preview_writer_fps(
+                            preview_fps_override=preview_fps_override,
+                            camera_fps=float(camera_info.get("fps", 0.0) or 0.0),
+                            camera_fps_target=fps_cfg,
                         )
-                        if fps_for_writer <= 0:
-                            fps_cfg = _optional_float(self.config.get("camera", {}).get("fps_target"))
-                            fps_for_writer = fps_cfg if fps_cfg is not None and fps_cfg > 0 else 30.0
 
                         preview_video_path = self._resolve_preview_video_path(preview_filename)
                         preview_video_path.parent.mkdir(parents=True, exist_ok=True)
@@ -460,11 +468,13 @@ class RealtimeApp:
                             preview_writer_opened = True
                             metadata["preview_recording"]["resolved_path"] = str(preview_video_path)
                             metadata["preview_recording"]["fps_actual"] = float(fps_for_writer)
+                            metadata["preview_recording"]["fps_source"] = fps_source
                             self.logger.info(
-                                "Preview recording started: %s (codec=%s fps=%.2f, overlay=%s)",
+                                "Preview recording started: %s (codec=%s fps=%.2f source=%s overlay=%s)",
                                 preview_video_path,
                                 preview_codec,
                                 fps_for_writer,
+                                fps_source,
                                 preview_overlay,
                             )
                             issue_logger.log(
@@ -473,6 +483,7 @@ class RealtimeApp:
                                 path=str(preview_video_path),
                                 codec=preview_codec,
                                 fps=fps_for_writer,
+                                fps_source=fps_source,
                                 width=w,
                                 height=h,
                                 overlay=preview_overlay,
@@ -557,6 +568,7 @@ class RealtimeApp:
             end_wall = time.time()
             metadata.update(
                 {
+                    "dlc_model": (runtime.model_info() if runtime is not None else metadata.get("dlc_model")),
                     "end_time_utc": utc_now_iso(),
                     "end_wall": end_wall,
                     "duration_s": max(0.0, end_wall - start_wall),
@@ -714,6 +726,20 @@ class RealtimeApp:
         if path.is_absolute():
             return path
         return self.session_dir / path
+
+    @staticmethod
+    def _resolve_preview_writer_fps(
+        preview_fps_override: Optional[float],
+        camera_fps: float,
+        camera_fps_target: Optional[float],
+    ) -> Tuple[float, str]:
+        if preview_fps_override is not None and preview_fps_override > 0:
+            return float(preview_fps_override), "preview_recording.fps"
+        if camera_fps_target is not None and camera_fps_target > 0:
+            return float(camera_fps_target), "camera.fps_target"
+        if camera_fps > 0:
+            return float(camera_fps), "camera_reported_fps"
+        return 30.0, "default_30"
 
     @staticmethod
     def _format_elapsed_hhmmss(seconds: float) -> str:

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
+import time
 from typing import Any, Dict, Optional, Tuple, Union
 
 import cv2
@@ -20,6 +22,14 @@ class CameraConfig:
 class CameraStream:
     def __init__(self, cfg: CameraConfig):
         self.cfg = cfg
+        self._source_is_file = isinstance(cfg.source, str) and Path(cfg.source).exists()
+        self._throttle_period_s: Optional[float] = None
+        self._next_frame_deadline: Optional[float] = None
+
+        if self._source_is_file and cfg.fps_target is not None and float(cfg.fps_target) > 0:
+            # Video files are often decoded as fast as possible; throttle to target FPS for realtime behavior.
+            self._throttle_period_s = 1.0 / float(cfg.fps_target)
+
         self.cap = cv2.VideoCapture(cfg.source)
         if not self.cap.isOpened():
             raise RuntimeError(f"Failed to open camera/video source: {cfg.source}")
@@ -51,6 +61,7 @@ class CameraStream:
             m = cv2.getRotationMatrix2D((w / 2, h / 2), rotate, 1.0)
             frame = cv2.warpAffine(frame, m, (w, h))
 
+        self._apply_realtime_throttle_if_needed()
         return True, frame
 
     def camera_info(self) -> Dict[str, Any]:
@@ -59,6 +70,9 @@ class CameraStream:
             "width": int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH)),
             "height": int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT)),
             "fps": float(self.cap.get(cv2.CAP_PROP_FPS) or 0.0),
+            "fps_target": (float(self.cfg.fps_target) if self.cfg.fps_target is not None else None),
+            "source_is_file": self._source_is_file,
+            "file_realtime_throttle": bool(self._throttle_period_s is not None),
             "flip": bool(self.cfg.flip),
             "rotate_deg": int(self.cfg.rotate_deg),
         }
@@ -66,3 +80,22 @@ class CameraStream:
     def release(self) -> None:
         if self.cap is not None:
             self.cap.release()
+
+    def _apply_realtime_throttle_if_needed(self) -> None:
+        if self._throttle_period_s is None:
+            return
+
+        now = time.perf_counter()
+        if self._next_frame_deadline is None:
+            self._next_frame_deadline = now + self._throttle_period_s
+            return
+
+        sleep_s = self._next_frame_deadline - now
+        if sleep_s > 0:
+            time.sleep(sleep_s)
+            now = time.perf_counter()
+
+        next_deadline = self._next_frame_deadline + self._throttle_period_s
+        if next_deadline < now:
+            next_deadline = now + self._throttle_period_s
+        self._next_frame_deadline = next_deadline

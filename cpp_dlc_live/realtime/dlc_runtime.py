@@ -68,6 +68,7 @@ class DLCLiveRuntime(RuntimeBase):
         self.backend = _normalize_backend(backend)
         self.device = _normalize_device(device)
         self._initialized = False
+        self._runtime_device: Optional[str] = None
 
         try:
             from dlclive import DLCLive, Processor  # type: ignore
@@ -93,6 +94,7 @@ class DLCLiveRuntime(RuntimeBase):
         if not self._initialized:
             self._dlc.init_inference(frame)
             self._initialized = True
+            self._runtime_device = _resolve_runtime_device(self._dlc)
 
         pose = np.asarray(self._dlc.get_pose(frame))
         if pose.ndim != 2 or pose.shape[1] < 3:
@@ -108,7 +110,8 @@ class DLCLiveRuntime(RuntimeBase):
             "bodyparts": self._bodyparts,
             "target_bodypart": self.bodypart,
             "backend": self.backend,
-            "device": self.device,
+            "device_requested": self.device,
+            "device_runtime": self._runtime_device,
             "snapshot": self._snapshot,
         }
 
@@ -121,6 +124,24 @@ def build_runtime(dlc_cfg: Dict[str, Any], logger: Optional[logging.Logger] = No
 
     if model_path and Path(model_path).exists():
         try:
+            torch_info = _probe_torch_env()
+            if logger:
+                if "import_error" in torch_info:
+                    logger.warning("PyTorch import failed: %s", torch_info["import_error"])
+                else:
+                    logger.info(
+                        "PyTorch env: version=%s cuda_available=%s cuda_version=%s device_count=%s",
+                        torch_info.get("torch_version"),
+                        torch_info.get("cuda_available"),
+                        torch_info.get("cuda_version"),
+                        torch_info.get("cuda_device_count"),
+                    )
+                    if str(device).startswith("cuda") and not bool(torch_info.get("cuda_available", False)):
+                        logger.warning(
+                            "dlc.device=%s requested, but torch.cuda.is_available() is False; inference will run on CPU",
+                            device,
+                        )
+
             runtime = DLCLiveRuntime(
                 model_path=model_path,
                 bodypart=bodypart,
@@ -280,3 +301,37 @@ def _build_dlclive_instance(
     if last_error is not None:
         raise last_error
     raise RuntimeError("Failed to construct DLCLive runtime")
+
+
+def _resolve_runtime_device(dlc_obj: Any) -> Optional[str]:
+    try:
+        runner = getattr(dlc_obj, "runner", None)
+        if runner is None:
+            return None
+        value = getattr(runner, "device", None)
+        if value is None:
+            return None
+        return str(value)
+    except Exception:
+        return None
+
+
+def _probe_torch_env() -> Dict[str, Any]:
+    try:
+        import torch  # type: ignore
+    except Exception as exc:
+        return {"import_error": str(exc)}
+
+    info: Dict[str, Any] = {
+        "torch_version": getattr(torch, "__version__", None),
+        "cuda_version": getattr(getattr(torch, "version", None), "cuda", None),
+    }
+    try:
+        info["cuda_available"] = bool(torch.cuda.is_available())
+    except Exception:
+        info["cuda_available"] = False
+    try:
+        info["cuda_device_count"] = int(torch.cuda.device_count())
+    except Exception:
+        info["cuda_device_count"] = 0
+    return info
