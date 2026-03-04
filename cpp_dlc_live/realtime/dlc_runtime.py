@@ -56,10 +56,17 @@ class MockDLCRuntime(RuntimeBase):
 
 
 class DLCLiveRuntime(RuntimeBase):
-    def __init__(self, model_path: str, bodypart: str = "center", backend: str = "auto"):
+    def __init__(
+        self,
+        model_path: str,
+        bodypart: str = "center",
+        backend: str = "auto",
+        device: str = "auto",
+    ):
         self.model_path = str(model_path)
         self.bodypart = bodypart
         self.backend = _normalize_backend(backend)
+        self.device = _normalize_device(device)
         self._initialized = False
 
         try:
@@ -74,14 +81,13 @@ class DLCLiveRuntime(RuntimeBase):
 
         # Prefer explicit backend selection for DLC 3.0 PyTorch models.
         model_type_value = _resolve_model_type_value(self.backend)
-        if model_type_value is not None:
-            try:
-                self._dlc = DLCLive(model_path, processor=processor, model_type=model_type_value)
-            except TypeError:
-                # Backward compatibility for older dlclive signatures.
-                self._dlc = DLCLive(model_path, processor=processor)
-        else:
-            self._dlc = DLCLive(model_path, processor=processor)
+        self._dlc = _build_dlclive_instance(
+            DLCLive=DLCLive,
+            model_path=model_path,
+            processor=processor,
+            model_type_value=model_type_value,
+            device_value=(None if self.device == "auto" else self.device),
+        )
 
     def infer(self, frame: np.ndarray) -> PoseResult:
         if not self._initialized:
@@ -102,6 +108,7 @@ class DLCLiveRuntime(RuntimeBase):
             "bodyparts": self._bodyparts,
             "target_bodypart": self.bodypart,
             "backend": self.backend,
+            "device": self.device,
             "snapshot": self._snapshot,
         }
 
@@ -109,13 +116,24 @@ class DLCLiveRuntime(RuntimeBase):
 def build_runtime(dlc_cfg: Dict[str, Any], logger: Optional[logging.Logger] = None) -> RuntimeBase:
     bodypart = str(dlc_cfg.get("bodypart", "center"))
     backend = _normalize_backend(dlc_cfg.get("backend", "auto"))
+    device = _normalize_device(dlc_cfg.get("device", "auto"))
     model_path = str(dlc_cfg.get("model_path", "")).strip()
 
     if model_path and Path(model_path).exists():
         try:
-            runtime = DLCLiveRuntime(model_path=model_path, bodypart=bodypart, backend=backend)
+            runtime = DLCLiveRuntime(
+                model_path=model_path,
+                bodypart=bodypart,
+                backend=backend,
+                device=device,
+            )
             if logger:
-                logger.info("Using DLCLive runtime from %s (backend=%s)", model_path, backend)
+                logger.info(
+                    "Using DLCLive runtime from %s (backend=%s, device=%s)",
+                    model_path,
+                    backend,
+                    device,
+                )
             return runtime
         except Exception:
             if logger:
@@ -208,3 +226,57 @@ def _resolve_model_type_value(backend: str) -> Any:
 
     # Fallback for dlclive builds that accept string model type.
     return backend
+
+
+def _normalize_device(value: Any) -> str:
+    text = str(value or "auto").strip().lower()
+    if not text:
+        return "auto"
+    if text in {"auto", "cpu", "cuda"}:
+        return text
+    if text.startswith("cuda:"):
+        suffix = text.split(":", 1)[1].strip()
+        if suffix.isdigit():
+            return f"cuda:{suffix}"
+    return text
+
+
+def _build_dlclive_instance(
+    DLCLive: Any,
+    model_path: str,
+    processor: Any,
+    model_type_value: Any,
+    device_value: Optional[str],
+) -> Any:
+    # Try richer signatures first, then degrade for backward compatibility.
+    kwargs_attempts = []
+    full_kwargs: Dict[str, Any] = {"processor": processor}
+    if model_type_value is not None:
+        full_kwargs["model_type"] = model_type_value
+    if device_value is not None:
+        full_kwargs["device"] = device_value
+    kwargs_attempts.append(full_kwargs)
+
+    if "device" in full_kwargs:
+        no_device = dict(full_kwargs)
+        no_device.pop("device", None)
+        kwargs_attempts.append(no_device)
+
+    if "model_type" in full_kwargs:
+        no_model_type = dict(full_kwargs)
+        no_model_type.pop("model_type", None)
+        kwargs_attempts.append(no_model_type)
+
+    kwargs_attempts.append({"processor": processor})
+
+    last_error: Optional[TypeError] = None
+    for kwargs in kwargs_attempts:
+        try:
+            return DLCLive(model_path, **kwargs)
+        except TypeError as exc:
+            last_error = exc
+            continue
+
+    if last_error is not None:
+        raise last_error
+    raise RuntimeError("Failed to construct DLCLive runtime")

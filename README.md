@@ -244,6 +244,7 @@ Note: always replace any machine-specific paths with your own absolute paths.
 ### `dlc`
 - `dlc.model_path`: DLCLive model path (typically exported artifact)
 - `dlc.backend`: `auto` | `pytorch` | `tensorflow`
+- `dlc.device`: `auto` | `cpu` | `cuda` | `cuda:0` (passed to DLCLive when supported)
 - `dlc.bodypart`: tracked bodypart name (must exist in model, unless fallback logic is intentional)
 - `dlc.p_thresh`: confidence threshold
 - `dlc.smoothing.enabled`, `dlc.smoothing.window`
@@ -301,6 +302,7 @@ camera:
 dlc:
   model_path: C:/data/models/exported-models-pytorch/your_model.pt
   backend: pytorch
+  device: cuda
   bodypart: Mouse
   p_thresh: 0.2
   smoothing:
