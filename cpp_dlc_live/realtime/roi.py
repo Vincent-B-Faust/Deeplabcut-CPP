@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import TYPE_CHECKING, Dict, List, Optional, Sequence, Tuple
 
 import cv2
 import numpy as np
+
+if TYPE_CHECKING:
+    from cpp_dlc_live.realtime.camera import CameraStream
 
 Point = Tuple[float, float]
 
@@ -263,3 +266,170 @@ def calibrate_roi_with_frame(frame: np.ndarray, with_neutral: bool = True) -> Di
 
     cv2.destroyWindow(win)
     return {name: [[int(x), int(y)] for x, y in pts] for name, pts in points_by_roi.items()}
+
+
+def calibrate_roi_with_camera(
+    camera: "CameraStream",
+    with_neutral: bool = True,
+    exposure_step: float = 1.0,
+    gain_step: float = 1.0,
+) -> Tuple[Dict[str, List[List[int]]], Dict[str, object]]:
+    names = ["chamber1", "chamber2"] + (["neutral"] if with_neutral else [])
+    points_by_roi: Dict[str, List[Tuple[int, int]]] = {}
+    current_idx = 0
+    current_points: List[Tuple[int, int]] = []
+
+    info = camera.camera_info()
+    auto_exp = _normalize_auto_exposure(info.get("auto_exposure_requested"), info.get("auto_exposure"))
+    exposure = _pick_float(info.get("exposure_requested"), info.get("exposure"))
+    gain = _pick_float(info.get("gain_requested"), info.get("gain"))
+    exposure_step = max(1e-6, float(exposure_step))
+    gain_step = max(1e-6, float(gain_step))
+
+    win = "ROI+Exposure Calibrator"
+
+    def on_mouse(event: int, x: int, y: int, _flags: int, _param: object) -> None:
+        if event == cv2.EVENT_LBUTTONDOWN and current_idx < len(names):
+            current_points.append((x, y))
+
+    cv2.namedWindow(win, cv2.WINDOW_NORMAL)
+    cv2.setMouseCallback(win, on_mouse)
+
+    while True:
+        ok, frame = camera.read()
+        if not ok or frame is None:
+            cv2.destroyWindow(win)
+            raise RuntimeError("Failed to read camera frame during ROI calibration")
+        canvas = frame.copy()
+
+        for name, pts in points_by_roi.items():
+            arr = np.array(pts, dtype=np.int32).reshape((-1, 1, 2))
+            cv2.polylines(canvas, [arr], True, (0, 255, 0), 2)
+            cv2.putText(canvas, name, (arr[0, 0, 0], arr[0, 0, 1] - 6), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+
+        if current_idx < len(names):
+            if len(current_points) > 1:
+                arr = np.array(current_points, dtype=np.int32).reshape((-1, 1, 2))
+                cv2.polylines(canvas, [arr], False, (0, 0, 255), 2)
+            for x, y in current_points:
+                cv2.circle(canvas, (x, y), 3, (0, 0, 255), -1)
+            cv2.putText(
+                canvas,
+                f"ROI: {names[current_idx]} | click:add u:undo r:reset n:next s:save q:quit",
+                (10, 25),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.6,
+                (255, 255, 255),
+                2,
+            )
+        else:
+            cv2.putText(
+                canvas,
+                "All ROI done | s:save q:quit",
+                (10, 25),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.7,
+                (255, 255, 255),
+                2,
+            )
+
+        exp_text = "None" if exposure is None else f"{exposure:.3f}"
+        gain_text = "None" if gain is None else f"{gain:.3f}"
+        cv2.putText(
+            canvas,
+            f"Exposure: auto={auto_exp} exp={exp_text} gain={gain_text}",
+            (10, 54),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.6,
+            (255, 255, 255),
+            2,
+        )
+        cv2.putText(
+            canvas,
+            f"a:toggle_auto [:exp- ]:exp+ ,:gain- .:gain+ steps(exp={exposure_step:.3f},gain={gain_step:.3f})",
+            (10, 83),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.55,
+            (255, 255, 255),
+            2,
+        )
+
+        cv2.imshow(win, canvas)
+        key = cv2.waitKey(20) & 0xFF
+
+        if key in (ord("q"), 27):
+            cv2.destroyWindow(win)
+            raise RuntimeError("ROI calibration cancelled by user")
+
+        if key == ord("u") and current_points:
+            current_points.pop()
+        elif key == ord("r"):
+            current_points.clear()
+        elif key == ord("n"):
+            if current_idx >= len(names):
+                continue
+            if len(current_points) < 3:
+                continue
+            points_by_roi[names[current_idx]] = list(current_points)
+            current_points.clear()
+            current_idx += 1
+        elif key == ord("a"):
+            auto_exp = not auto_exp
+            camera.set_auto_exposure(auto_exp)
+        elif key in (ord("["), ord("{")):
+            auto_exp = False
+            camera.set_auto_exposure(False)
+            exposure = (exposure if exposure is not None else 0.0) - exposure_step
+            exposure = camera.set_exposure(exposure)
+        elif key in (ord("]"), ord("}")):
+            auto_exp = False
+            camera.set_auto_exposure(False)
+            exposure = (exposure if exposure is not None else 0.0) + exposure_step
+            exposure = camera.set_exposure(exposure)
+        elif key == ord(","):
+            gain = (gain if gain is not None else 0.0) - gain_step
+            gain = camera.set_gain(gain)
+        elif key == ord("."):
+            gain = (gain if gain is not None else 0.0) + gain_step
+            gain = camera.set_gain(gain)
+        elif key == ord("s"):
+            if current_idx < len(names):
+                if len(current_points) >= 3:
+                    points_by_roi[names[current_idx]] = list(current_points)
+                    current_points.clear()
+                    current_idx += 1
+                else:
+                    continue
+            if all(name in points_by_roi for name in names):
+                break
+
+    cv2.destroyWindow(win)
+    return (
+        {name: [[int(x), int(y)] for x, y in pts] for name, pts in points_by_roi.items()},
+        {"auto_exposure": bool(auto_exp), "exposure": exposure, "gain": gain},
+    )
+
+
+def _pick_float(primary: object, fallback: object) -> Optional[float]:
+    if primary is not None:
+        return float(primary)
+    if fallback is not None:
+        return float(fallback)
+    return None
+
+
+def _normalize_auto_exposure(primary: object, fallback: object) -> bool:
+    if isinstance(primary, bool):
+        return primary
+    if primary is not None:
+        return _is_auto_exposure_numeric(float(primary))
+    if fallback is not None:
+        return _is_auto_exposure_numeric(float(fallback))
+    return True
+
+
+def _is_auto_exposure_numeric(v: float) -> bool:
+    # Typical OpenCV backends:
+    # - manual: 0.25 / 1.0 / 0.0
+    # - auto:   0.75 / 3.0
+    return float(v) >= 0.5 and float(v) not in {1.0}

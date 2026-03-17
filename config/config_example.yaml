@@ -10,6 +10,12 @@ camera:
   height: 720
   fps_target: 30
   enforce_fps: false
+  # Set false to lock exposure; null keeps camera default behavior.
+  auto_exposure: null
+  # Manual exposure value (device/backend-specific units; often negative on Windows UVC).
+  exposure: null
+  # Optional analog/digital gain (device/backend-specific units).
+  gain: null
   flip: false
   rotate_deg: 0
 dlc:

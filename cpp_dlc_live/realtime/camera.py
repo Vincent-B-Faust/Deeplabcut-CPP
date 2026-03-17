@@ -16,6 +16,9 @@ class CameraConfig:
     height: Optional[int] = None
     fps_target: Optional[float] = None
     enforce_fps: bool = False
+    auto_exposure: Optional[bool] = None
+    exposure: Optional[float] = None
+    gain: Optional[float] = None
     flip: bool = False
     rotate_deg: int = 0
 
@@ -43,6 +46,7 @@ class CameraStream:
             self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, int(cfg.height))
         if cfg.fps_target is not None:
             self.cap.set(cv2.CAP_PROP_FPS, float(cfg.fps_target))
+        self._apply_exposure_settings()
 
     def read(self) -> Tuple[bool, Optional[np.ndarray]]:
         ok, frame = self.cap.read()
@@ -75,6 +79,12 @@ class CameraStream:
             "fps": float(self.cap.get(cv2.CAP_PROP_FPS) or 0.0),
             "fps_target": (float(self.cfg.fps_target) if self.cfg.fps_target is not None else None),
             "enforce_fps": bool(self.cfg.enforce_fps),
+            "auto_exposure_requested": self.cfg.auto_exposure,
+            "exposure_requested": self.cfg.exposure,
+            "gain_requested": self.cfg.gain,
+            "auto_exposure": float(self.cap.get(cv2.CAP_PROP_AUTO_EXPOSURE) or 0.0),
+            "exposure": float(self.cap.get(cv2.CAP_PROP_EXPOSURE) or 0.0),
+            "gain": float(self.cap.get(cv2.CAP_PROP_GAIN) or 0.0),
             "source_is_file": self._source_is_file,
             "file_realtime_throttle": bool(self._throttle_period_s is not None),
             "fps_throttle_reason": self._throttle_reason,
@@ -85,6 +95,23 @@ class CameraStream:
     def release(self) -> None:
         if self.cap is not None:
             self.cap.release()
+
+    def set_auto_exposure(self, enabled: bool) -> float:
+        # CAP_PROP_AUTO_EXPOSURE is backend-specific:
+        # - DirectShow often uses 0.25(manual)/0.75(auto)
+        # - V4L2 often uses 1(manual)/3(auto)
+        candidates = (0.75, 3.0, 1.0) if bool(enabled) else (0.25, 1.0, 0.0)
+        for value in candidates:
+            self.cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, float(value))
+        return float(self.cap.get(cv2.CAP_PROP_AUTO_EXPOSURE) or 0.0)
+
+    def set_exposure(self, value: float) -> float:
+        self.cap.set(cv2.CAP_PROP_EXPOSURE, float(value))
+        return float(self.cap.get(cv2.CAP_PROP_EXPOSURE) or 0.0)
+
+    def set_gain(self, value: float) -> float:
+        self.cap.set(cv2.CAP_PROP_GAIN, float(value))
+        return float(self.cap.get(cv2.CAP_PROP_GAIN) or 0.0)
 
     def _apply_realtime_throttle_if_needed(self) -> None:
         if self._throttle_period_s is None:
@@ -104,3 +131,13 @@ class CameraStream:
         if next_deadline < now:
             next_deadline = now + self._throttle_period_s
         self._next_frame_deadline = next_deadline
+
+    def _apply_exposure_settings(self) -> None:
+        if self.cfg.auto_exposure is not None:
+            self.set_auto_exposure(bool(self.cfg.auto_exposure))
+
+        if self.cfg.exposure is not None:
+            self.set_exposure(float(self.cfg.exposure))
+
+        if self.cfg.gain is not None:
+            self.set_gain(float(self.cfg.gain))

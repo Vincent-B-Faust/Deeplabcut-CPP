@@ -12,7 +12,7 @@ from cpp_dlc_live.analysis.issues import analyze_issues
 from cpp_dlc_live.realtime.app import RealtimeApp
 from cpp_dlc_live.realtime.camera import CameraConfig, CameraStream
 from cpp_dlc_live.realtime.logging_utils import setup_logging
-from cpp_dlc_live.realtime.roi import calibrate_roi_with_frame
+from cpp_dlc_live.realtime.roi import calibrate_roi_with_camera, calibrate_roi_with_frame
 from cpp_dlc_live.utils.io_utils import file_sha256, load_yaml, prepare_session_dir, save_yaml
 
 
@@ -69,6 +69,8 @@ def _build_parser() -> argparse.ArgumentParser:
     p_cal.add_argument("--image", default=None, help="Use static image instead of camera")
     p_cal.add_argument("--save_to", default=None, help="Output YAML path (default: overwrite --config)")
     p_cal.add_argument("--without_neutral", action="store_true", help="Calibrate only chamber1/chamber2")
+    p_cal.add_argument("--exposure_step", type=float, default=1.0, help="Exposure step for calibration hotkeys")
+    p_cal.add_argument("--gain_step", type=float, default=1.0, help="Gain step for calibration hotkeys")
 
     return parser
 
@@ -136,10 +138,23 @@ def _cmd_calibrate_roi(args: argparse.Namespace) -> None:
     config_path = Path(args.config)
     config = load_yaml(config_path)
 
-    frame = _load_calibration_frame(config, args.image, args.camera_source)
     with_neutral = not bool(args.without_neutral)
+    camera_updates: Optional[Dict[str, object]] = None
 
-    roi_points = calibrate_roi_with_frame(frame, with_neutral=with_neutral)
+    if args.image:
+        frame = _load_calibration_image(args.image)
+        roi_points = calibrate_roi_with_frame(frame, with_neutral=with_neutral)
+    else:
+        cam = _open_calibration_camera(config, args.camera_source)
+        try:
+            roi_points, camera_updates = calibrate_roi_with_camera(
+                cam,
+                with_neutral=with_neutral,
+                exposure_step=float(args.exposure_step),
+                gain_step=float(args.gain_step),
+            )
+        finally:
+            cam.release()
 
     roi_cfg: Dict[str, Any] = config.setdefault("roi", {})
     roi_cfg["type"] = "polygon"
@@ -150,18 +165,23 @@ def _cmd_calibrate_roi(args: argparse.Namespace) -> None:
     else:
         roi_cfg.pop("neutral", None)
 
+    if camera_updates:
+        cam_cfg: Dict[str, Any] = config.setdefault("camera", {})
+        cam_cfg.update(camera_updates)
+
     save_path = Path(args.save_to) if args.save_to else config_path
     save_yaml(config, save_path)
     print(save_path)
 
 
-def _load_calibration_frame(config: Dict[str, Any], image_path: Optional[str], camera_source: Optional[str]):
-    if image_path:
-        frame = cv2.imread(image_path)
-        if frame is None:
-            raise RuntimeError(f"Failed to read image: {image_path}")
-        return frame
+def _load_calibration_image(image_path: str):
+    frame = cv2.imread(image_path)
+    if frame is None:
+        raise RuntimeError(f"Failed to read image: {image_path}")
+    return frame
 
+
+def _open_calibration_camera(config: Dict[str, Any], camera_source: Optional[str]) -> CameraStream:
     cam_cfg = dict(config.get("camera", {}))
     if camera_source is not None:
         cam_cfg["source"] = _parse_source(camera_source)
@@ -171,17 +191,13 @@ def _load_calibration_frame(config: Dict[str, Any], image_path: Optional[str], c
         width=cam_cfg.get("width"),
         height=cam_cfg.get("height"),
         fps_target=cam_cfg.get("fps_target"),
+        auto_exposure=cam_cfg.get("auto_exposure"),
+        exposure=cam_cfg.get("exposure"),
+        gain=cam_cfg.get("gain"),
         flip=bool(cam_cfg.get("flip", False)),
         rotate_deg=int(cam_cfg.get("rotate_deg", 0)),
     )
-    cam = CameraStream(cfg)
-    try:
-        ok, frame = cam.read()
-        if not ok or frame is None:
-            raise RuntimeError("Failed to capture frame for ROI calibration")
-        return frame
-    finally:
-        cam.release()
+    return CameraStream(cfg)
 
 
 def _parse_source(raw: Union[str, int, None]) -> Union[str, int]:

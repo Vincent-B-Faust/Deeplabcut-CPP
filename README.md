@@ -264,6 +264,9 @@ Note: always replace any machine-specific paths with your own absolute paths.
   - For camera devices, `fps_target` is requested via OpenCV capture settings.
   - For video-file sources, `fps_target` is also used to throttle playback to realtime speed.
   - Set `camera.enforce_fps=true` to throttle realtime loop to `fps_target` even on camera input.
+- `camera.auto_exposure`: `true` (auto) | `false` (manual lock) | `null` (leave driver default)
+- `camera.exposure`: manual exposure value (`auto_exposure=false` recommended); unit/range is camera-driver specific
+- `camera.gain`: optional gain value; unit/range is camera-driver specific
 - `camera.flip`, `camera.rotate_deg`
 
 ### `dlc`
@@ -332,6 +335,9 @@ camera:
   height: 720
   fps_target: 30
   enforce_fps: false
+  auto_exposure: null
+  exposure: null
+  gain: null
   flip: false
   rotate_deg: 0
 
@@ -450,14 +456,24 @@ Options:
 - `--image /path/to/background.png`
 - `--save_to /path/to/new_config.yaml`
 - `--without_neutral`
+- `--exposure_step 1.0`
+- `--gain_step 1.0`
 
 Calibrator controls:
 - left click: add point
 - `u`: undo
 - `r`: reset current ROI
 - `n`: finish current ROI and move next
+- `a`: toggle auto exposure
+- `[` / `]`: exposure down/up (forces manual mode)
+- `,` / `.`: gain down/up
 - `s`: save
 - `q`/`Esc`: cancel
+
+When using camera input (not `--image`), `calibrate_roi` can now update both ROI and camera exposure fields in config:
+- `camera.auto_exposure`
+- `camera.exposure`
+- `camera.gain`
 
 ## Recommended End-to-End Workflow
 

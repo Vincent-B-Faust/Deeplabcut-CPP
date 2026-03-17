@@ -756,6 +756,9 @@ class RealtimeApp:
             height=_optional_int(cam_cfg.get("height")),
             fps_target=_optional_float(cam_cfg.get("fps_target")),
             enforce_fps=bool(cam_cfg.get("enforce_fps", False)),
+            auto_exposure=_optional_bool(cam_cfg.get("auto_exposure")),
+            exposure=_optional_float(cam_cfg.get("exposure")),
+            gain=_optional_float(cam_cfg.get("gain")),
             flip=bool(cam_cfg.get("flip", False)),
             rotate_deg=int(cam_cfg.get("rotate_deg", 0)),
         )
@@ -914,3 +917,16 @@ def _optional_int(v: Any) -> Optional[int]:
 
 def _optional_float(v: Any) -> Optional[float]:
     return float(v) if v is not None else None
+
+
+def _optional_bool(v: Any) -> Optional[bool]:
+    if v is None:
+        return None
+    if isinstance(v, bool):
+        return v
+    text = str(v).strip().lower()
+    if text in {"1", "true", "yes", "on"}:
+        return True
+    if text in {"0", "false", "no", "off"}:
+        return False
+    raise ValueError(f"Invalid boolean value: {v}")
