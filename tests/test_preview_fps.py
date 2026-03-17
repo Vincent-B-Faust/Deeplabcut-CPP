@@ -29,3 +29,14 @@ def test_resolve_preview_writer_fps_falls_back_default() -> None:
     )
     assert fps == 30.0
     assert source == "default_30"
+
+
+def test_resolve_preview_writer_fps_custom_override_source() -> None:
+    fps, source = RealtimeApp._resolve_preview_writer_fps(
+        preview_fps_override=20.0,
+        camera_fps=120.0,
+        camera_fps_target=30.0,
+        override_source_label="fixed_fps(global)",
+    )
+    assert fps == 20.0
+    assert source == "fixed_fps(global)"

@@ -45,11 +45,13 @@ def _build_parser() -> argparse.ArgumentParser:
     p_run.add_argument("--out_dir", default=None, help="Session output root override")
     p_run.add_argument("--duration_s", type=float, default=None, help="Optional run duration in seconds")
     p_run.add_argument("--camera_source", default=None, help="Camera source override (int index or URL/path)")
+    p_run.add_argument("--fixed_fps", type=float, default=None, help="Optional global fixed FPS override")
     p_run.add_argument("--no_preview", action="store_true", help="Disable OpenCV preview window")
 
     p_an = sub.add_parser("analyze_session", help="Analyze one session directory")
     p_an.add_argument("--session_dir", required=True, help="Path to session directory")
     p_an.add_argument("--cm_per_px", type=float, default=None, help="Override cm_per_px")
+    p_an.add_argument("--fixed_fps", type=float, default=None, help="Use global fixed FPS timebase for metrics")
     p_an.add_argument("--fixed_fps_hz", type=float, default=None, help="Use fixed FPS timebase for metrics")
     p_an.add_argument("--no_plots", action="store_true", help="Disable plot output")
 
@@ -78,6 +80,8 @@ def _cmd_run_realtime(args: argparse.Namespace) -> None:
     camera_override = _parse_source(args.camera_source) if args.camera_source is not None else None
     if camera_override is not None:
         config.setdefault("camera", {})["source"] = camera_override
+    if args.fixed_fps is not None:
+        config["fixed_fps"] = float(args.fixed_fps)
 
     session_dir = prepare_session_dir(config, out_dir_override=args.out_dir)
 
@@ -107,7 +111,8 @@ def _cmd_analyze_session(args: argparse.Namespace) -> None:
     summary_path = analyze_session(
         session_dir=session_dir,
         cm_per_px_override=args.cm_per_px,
-        fixed_fps_hz_override=args.fixed_fps_hz,
+        # Keep backward compatibility with --fixed_fps_hz while preferring the new unified --fixed_fps.
+        fixed_fps_hz_override=(args.fixed_fps if args.fixed_fps is not None else args.fixed_fps_hz),
         output_plots_override=(False if args.no_plots else None),
         logger=logger,
     )

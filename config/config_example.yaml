@@ -2,6 +2,8 @@ project:
   name: cpp_dlc_live
   session_id: auto_timestamp
   out_dir: D:/data/LiuZY/deeplabcut_cpp/dryrun_test_output
+# Optional global fixed FPS. When set, it overrides runtime cadence + recording FPS + analysis timebase.
+fixed_fps: null
 camera:
   source: C:/Users/admin/Downloads/Trial_11_7381.avi
   width: 1280
@@ -78,6 +80,7 @@ laser_control:
   fallback_to_dryrun: true
 analysis:
   cm_per_px: null
+  # Legacy per-analysis fixed FPS. Prefer top-level fixed_fps for unified behavior.
   fixed_fps_hz: null
   output_plots: true
 preview_recording:
@@ -86,6 +89,11 @@ preview_recording:
   codec: mp4v
   fps: null
   overlay: true
+raw_recording:
+  enabled: false
+  filename: raw_video.mp4
+  codec: mp4v
+  fps: null
 runtime_logging:
   enabled: true
   issue_events_file: issue_events.jsonl

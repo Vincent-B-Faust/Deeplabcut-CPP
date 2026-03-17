@@ -31,11 +31,20 @@ def analyze_session(
         config = load_yaml(config_path)
 
     analysis_cfg = config.get("analysis", {}) if isinstance(config, dict) else {}
+    global_fixed_fps = _coerce_optional_positive_float(
+        (config.get("fixed_fps") if isinstance(config, dict) else None),
+        field_name="fixed_fps",
+    )
     cm_per_px = cm_per_px_override if cm_per_px_override is not None else analysis_cfg.get("cm_per_px")
+    analysis_fixed_fps_hz = _coerce_optional_positive_float(
+        analysis_cfg.get("fixed_fps_hz"),
+        field_name="analysis.fixed_fps_hz",
+    )
     fixed_fps_hz = (
-        fixed_fps_hz_override
+        _coerce_optional_positive_float(fixed_fps_hz_override, field_name="fixed_fps override")
         if fixed_fps_hz_override is not None
-        else analysis_cfg.get("fixed_fps_hz")
+        # Priority: CLI override > global fixed_fps > legacy analysis.fixed_fps_hz.
+        else (global_fixed_fps if global_fixed_fps is not None else analysis_fixed_fps_hz)
     )
     output_plots = (
         output_plots_override
@@ -64,3 +73,12 @@ def analyze_session(
             logger.exception("Failed to generate plots")
 
     return summary_path
+
+
+def _coerce_optional_positive_float(value: object, field_name: str) -> Optional[float]:
+    if value is None:
+        return None
+    parsed = float(value)
+    if parsed <= 0:
+        raise ValueError(f"{field_name} must be > 0")
+    return parsed

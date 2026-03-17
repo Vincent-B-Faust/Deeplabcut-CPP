@@ -41,6 +41,7 @@ python -m cpp_dlc_live.cli --help
 
 1. `session_id` 建议使用 `auto_timestamp`。
 2. `out_dir` 建议按日期组织，比如 `./data`。
+3. 可选 `fixed_fps`：统一全局 FPS（用于实时节流、视频写出、离线分析）。
 
 ## 3.2 `camera`
 
@@ -90,6 +91,13 @@ python -m cpp_dlc_live.cli --help
 4. `fps`：写出帧率，留空会自动用相机 FPS/目标 FPS。
 5. `overlay=true`：保存带 ROI/状态叠加的视频；`false` 保存原始帧。
 
+## 3.8 `raw_recording`（可选同时录制原始视频）
+
+1. `enabled=true`：额外保存一份无叠加原始视频。
+2. `filename`：文件名（默认 `raw_video.mp4`）。
+3. `codec`：OpenCV FourCC（默认 `mp4v`）。
+4. `fps`：写出帧率，留空会自动用相机 FPS/目标 FPS。
+
 ## 4. 四条命令怎么用
 
 ## 4.1 ROI 标定（先做）
@@ -119,8 +127,10 @@ python -m cpp_dlc_live.cli run_realtime \
 常用可选参数：
 1. `--out_dir`：覆盖输出目录。
 2. `--camera_source`：覆盖相机/视频来源。
-3. `--no_preview`：无显示环境时关闭窗口。
-4. 即使 `--no_preview`，只要 `preview_recording.enabled=true` 仍会保存视频。
+3. `--fixed_fps`：临时覆盖配置中的全局统一 FPS。
+4. `--no_preview`：无显示环境时关闭窗口。
+5. 即使 `--no_preview`，只要 `preview_recording.enabled=true` 仍会保存视频。
+6. 同时设置 `preview_recording.enabled=true` 和 `raw_recording.enabled=true` 可同时保存“带标注视频 + 原始视频”。
 
 结束方式：
 1. 预览窗口按 `q` 或 `Esc`。
@@ -137,7 +147,8 @@ python -m cpp_dlc_live.cli analyze_session \
 
 可选：
 1. `--cm_per_px 0.05`。
-2. `--no_plots` 只要 summary。
+2. `--fixed_fps 30`：按固定 FPS 计算时长和速度。
+3. `--no_plots` 只要 summary。
 
 ## 4.4 问题日志分析（回溯专用）
 
@@ -195,12 +206,13 @@ python -m cpp_dlc_live.cli analyze_issues \
 3. `config_used.yaml`：当次配置快照。
 4. `run.log`：运行日志。
 5. `preview_overlay.mp4`：预览视频（开启 `preview_recording` 时生成，文件名可配置）。
-6. `issue_events.jsonl`：结构化问题日志（事件流）。
-7. `incident_report_*.json`：异常报告（发生异常时生成）。
-8. `summary.csv`：离线统计结果。
-9. `issue_summary.csv`：问题事件计数汇总（执行 `analyze_issues` 后生成）。
-10. `issue_timeline.csv`：问题时间线（执行 `analyze_issues` 后生成）。
-11. `incident_summary.csv`：异常摘要（执行 `analyze_issues` 后生成）。
+6. `raw_video.mp4`：原始视频（开启 `raw_recording` 时生成，文件名可配置）。
+7. `issue_events.jsonl`：结构化问题日志（事件流）。
+8. `incident_report_*.json`：异常报告（发生异常时生成）。
+9. `summary.csv`：离线统计结果。
+10. `issue_summary.csv`：问题事件计数汇总（执行 `analyze_issues` 后生成）。
+11. `issue_timeline.csv`：问题时间线（执行 `analyze_issues` 后生成）。
+12. `incident_summary.csv`：异常摘要（执行 `analyze_issues` 后生成）。
 
 ## 6.1 `summary.csv` 核心字段
 

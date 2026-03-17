@@ -49,6 +49,7 @@ class RealtimeApp:
         recorder: Optional[CSVRecorder] = None
         issue_logger: Optional[SessionIssueLogger] = None
         preview_writer: Optional[cv2.VideoWriter] = None
+        raw_writer: Optional[cv2.VideoWriter] = None
 
         frame_idx = 0
         processed_frames = 0
@@ -59,6 +60,9 @@ class RealtimeApp:
         preview_frames_written = 0
         preview_writer_opened = False
         preview_video_path: Optional[Path] = None
+        raw_frames_written = 0
+        raw_writer_opened = False
+        raw_video_path: Optional[Path] = None
         last_context: Dict[str, Any] = {}
         previous_chamber = "unknown"
         previous_laser_state = 0
@@ -94,6 +98,11 @@ class RealtimeApp:
             "inference_warn_ms": inference_warn_ms,
             "fps_warn_below": fps_warn_below,
         }
+        # Global fixed FPS: one knob to enforce a single cadence across runtime and recording.
+        fixed_fps = _optional_float(self.config.get("fixed_fps"))
+        if fixed_fps is not None and fixed_fps <= 0:
+            raise ValueError("fixed_fps must be > 0")
+        metadata["fixed_fps"] = fixed_fps
 
         raw_preview_record_cfg = self.config.get("preview_recording", {})
         preview_record_cfg = (
@@ -121,6 +130,26 @@ class RealtimeApp:
                 preview_codec_raw,
             )
 
+        raw_record_cfg_raw = self.config.get("raw_recording", {})
+        raw_record_cfg = dict(raw_record_cfg_raw) if isinstance(raw_record_cfg_raw, dict) else {}
+        raw_record_requested = bool(raw_record_cfg.get("enabled", False))
+        raw_record_enabled = raw_record_requested
+        raw_filename = str(raw_record_cfg.get("filename", "raw_video.mp4"))
+        raw_codec_raw = str(raw_record_cfg.get("codec", "mp4v")).strip()
+        raw_codec = raw_codec_raw if len(raw_codec_raw) == 4 else "mp4v"
+        raw_fps_override = _optional_float(raw_record_cfg.get("fps"))
+        metadata["raw_recording"] = {
+            "enabled_requested": raw_record_requested,
+            "filename": raw_filename,
+            "codec": raw_codec,
+            "fps_override": raw_fps_override,
+        }
+        if raw_codec != raw_codec_raw:
+            self.logger.warning(
+                "Invalid raw_recording.codec=%r, fallback to 'mp4v'",
+                raw_codec_raw,
+            )
+
         try:
             issue_logger = SessionIssueLogger(self.session_dir / issue_events_file, enabled=issue_enabled)
         except Exception:
@@ -131,12 +160,14 @@ class RealtimeApp:
             level="INFO",
             duration_s=self.duration_s,
             preview=self.preview,
+            fixed_fps=fixed_fps,
             preview_recording_requested=preview_record_requested,
+            raw_recording_requested=raw_record_requested,
             camera_source_override=self.camera_source_override,
         )
 
         try:
-            camera = self._create_camera()
+            camera = self._create_camera(fixed_fps=fixed_fps)
             camera_info = camera.camera_info()
             runtime = build_runtime(self.config.get("dlc", {}), logger=self.logger)
             roi = ChamberROI.from_config(self.config.get("roi", {}))
@@ -175,6 +206,7 @@ class RealtimeApp:
                 fallback_to_dryrun=laser_cfg.get("fallback_to_dryrun", True),
                 debounce_frames=self.config.get("roi", {}).get("debounce_frames", 8),
                 preview_recording_requested=preview_record_requested,
+                raw_recording_requested=raw_record_requested,
             )
 
             metadata.update(
@@ -187,7 +219,7 @@ class RealtimeApp:
                 }
             )
             self.logger.info(
-                "Effective camera: source=%s size=%sx%s fps_capture=%.3f fps_target=%s enforce_fps=%s source_is_file=%s file_throttle=%s throttle_reason=%s",
+                "Effective camera: source=%s size=%sx%s fps_capture=%.3f fps_target=%s enforce_fps=%s source_is_file=%s file_throttle=%s throttle_reason=%s fixed_fps=%s",
                 camera_info.get("source"),
                 camera_info.get("width"),
                 camera_info.get("height"),
@@ -197,6 +229,7 @@ class RealtimeApp:
                 camera_info.get("source_is_file"),
                 camera_info.get("file_realtime_throttle"),
                 camera_info.get("fps_throttle_reason"),
+                fixed_fps,
             )
 
             timestamps: Deque[float] = deque(maxlen=60)
@@ -431,10 +464,14 @@ class RealtimeApp:
                     if preview_writer is None:
                         h, w = frame_to_write.shape[:2]
                         fps_cfg = _optional_float(self.config.get("camera", {}).get("fps_target"))
+                        # Global fixed_fps has higher priority than preview_recording.fps.
+                        preview_fps_effective = fixed_fps if fixed_fps is not None else preview_fps_override
+                        preview_fps_source_label = "fixed_fps(global)" if fixed_fps is not None else "preview_recording.fps"
                         fps_for_writer, fps_source = self._resolve_preview_writer_fps(
-                            preview_fps_override=preview_fps_override,
+                            preview_fps_override=preview_fps_effective,
                             camera_fps=float(camera_info.get("fps", 0.0) or 0.0),
                             camera_fps_target=fps_cfg,
+                            override_source_label=preview_fps_source_label,
                         )
 
                         preview_video_path = self._resolve_preview_video_path(preview_filename)
@@ -494,6 +531,75 @@ class RealtimeApp:
                         preview_writer.write(frame_to_write)
                         preview_frames_written += 1
 
+                if raw_record_enabled:
+                    if raw_writer is None:
+                        h_raw, w_raw = frame.shape[:2]
+                        fps_cfg = _optional_float(self.config.get("camera", {}).get("fps_target"))
+                        # Global fixed_fps has higher priority than raw_recording.fps.
+                        raw_fps_effective = fixed_fps if fixed_fps is not None else raw_fps_override
+                        raw_fps_source_label = "fixed_fps(global)" if fixed_fps is not None else "raw_recording.fps"
+                        fps_for_raw_writer, raw_fps_source = self._resolve_preview_writer_fps(
+                            preview_fps_override=raw_fps_effective,
+                            camera_fps=float(camera_info.get("fps", 0.0) or 0.0),
+                            camera_fps_target=fps_cfg,
+                            override_source_label=raw_fps_source_label,
+                        )
+
+                        raw_video_path = self._resolve_preview_video_path(raw_filename)
+                        raw_video_path.parent.mkdir(parents=True, exist_ok=True)
+                        raw_fourcc = cv2.VideoWriter_fourcc(*raw_codec)
+                        raw_candidate = cv2.VideoWriter(
+                            str(raw_video_path),
+                            raw_fourcc,
+                            float(fps_for_raw_writer),
+                            (int(w_raw), int(h_raw)),
+                        )
+                        if not raw_candidate.isOpened():
+                            warning_count += 1
+                            raw_record_enabled = False
+                            raw_candidate.release()
+                            self.logger.warning(
+                                "Failed to open raw writer: %s (codec=%s fps=%.2f)",
+                                raw_video_path,
+                                raw_codec,
+                                fps_for_raw_writer,
+                            )
+                            issue_logger.log(
+                                "raw_video_writer_failed",
+                                level="WARNING",
+                                path=str(raw_video_path),
+                                codec=raw_codec,
+                                fps=fps_for_raw_writer,
+                                width=w_raw,
+                                height=h_raw,
+                            )
+                        else:
+                            raw_writer = raw_candidate
+                            raw_writer_opened = True
+                            metadata["raw_recording"]["resolved_path"] = str(raw_video_path)
+                            metadata["raw_recording"]["fps_actual"] = float(fps_for_raw_writer)
+                            metadata["raw_recording"]["fps_source"] = raw_fps_source
+                            self.logger.info(
+                                "Raw recording started: %s (codec=%s fps=%.2f source=%s)",
+                                raw_video_path,
+                                raw_codec,
+                                fps_for_raw_writer,
+                                raw_fps_source,
+                            )
+                            issue_logger.log(
+                                "raw_video_writer_started",
+                                level="INFO",
+                                path=str(raw_video_path),
+                                codec=raw_codec,
+                                fps=fps_for_raw_writer,
+                                fps_source=raw_fps_source,
+                                width=w_raw,
+                                height=h_raw,
+                            )
+                    if raw_writer is not None:
+                        raw_writer.write(frame)
+                        raw_frames_written += 1
+
                 if self.preview:
                     cv2.imshow("cpp_dlc_live", overlay_frame if overlay_frame is not None else frame)
                     key = cv2.waitKey(1) & 0xFF
@@ -548,6 +654,18 @@ class RealtimeApp:
                         preview_frames_written,
                     )
 
+            if raw_writer is not None:
+                try:
+                    raw_writer.release()
+                except Exception:
+                    self.logger.exception("Failed to close raw video writer")
+                if raw_video_path is not None:
+                    self.logger.info(
+                        "Raw recording saved: %s (frames=%d)",
+                        raw_video_path,
+                        raw_frames_written,
+                    )
+
             if controller is not None:
                 try:
                     controller.set_state(False)
@@ -583,6 +701,7 @@ class RealtimeApp:
                         "warnings": warning_count,
                         "issue_events_file": issue_events_file if issue_enabled else None,
                         "preview_frames_written": preview_frames_written,
+                        "raw_frames_written": raw_frames_written,
                     },
                     "preview_recording_result": {
                         "enabled_requested": preview_record_requested,
@@ -590,6 +709,13 @@ class RealtimeApp:
                         "writer_opened": preview_writer_opened,
                         "resolved_path": str(preview_video_path) if preview_video_path is not None else None,
                         "frames_written": preview_frames_written,
+                    },
+                    "raw_recording_result": {
+                        "enabled_requested": raw_record_requested,
+                        "enabled_effective": raw_record_enabled or raw_writer_opened,
+                        "writer_opened": raw_writer_opened,
+                        "resolved_path": str(raw_video_path) if raw_video_path is not None else None,
+                        "frames_written": raw_frames_written,
                     },
                     "last_context": last_context,
                 }
@@ -610,10 +736,14 @@ class RealtimeApp:
 
         return status_code
 
-    def _create_camera(self) -> CameraStream:
+    def _create_camera(self, fixed_fps: Optional[float] = None) -> CameraStream:
         cam_cfg = dict(self.config.get("camera", {}))
         if self.camera_source_override is not None:
             cam_cfg["source"] = self.camera_source_override
+        if fixed_fps is not None:
+            # Global fixed_fps enforces a single realtime frame cadence for camera and analysis.
+            cam_cfg["fps_target"] = fixed_fps
+            cam_cfg["enforce_fps"] = True
 
         source = cam_cfg.get("source", 0)
         if isinstance(source, str) and source.isdigit():
@@ -735,9 +865,10 @@ class RealtimeApp:
         preview_fps_override: Optional[float],
         camera_fps: float,
         camera_fps_target: Optional[float],
+        override_source_label: str = "preview_recording.fps",
     ) -> Tuple[float, str]:
         if preview_fps_override is not None and preview_fps_override > 0:
-            return float(preview_fps_override), "preview_recording.fps"
+            return float(preview_fps_override), override_source_label
         if camera_fps_target is not None and camera_fps_target > 0:
             return float(camera_fps_target), "camera.fps_target"
         if camera_fps > 0:

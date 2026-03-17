@@ -237,12 +237,14 @@ Note: always replace any machine-specific paths with your own absolute paths.
 ## Top-level config sections
 
 - `project`: session naming and output location
+- `fixed_fps`: optional global fixed FPS for runtime + recording + analysis
 - `camera`: source and transform options
 - `dlc`: model path/backend/bodypart/confidence/smoothing
 - `roi`: chamber polygons/rectangles + neutral policy + debounce
 - `laser_control`: hardware strategy and channels
 - `analysis`: offline metric options
 - `preview_recording`: optional save of preview video
+- `raw_recording`: optional save of raw (unannotated) video
 - `runtime_logging`: issue/heartbeat/warning settings
 
 ## Field reference (practical)
@@ -250,6 +252,11 @@ Note: always replace any machine-specific paths with your own absolute paths.
 ### `project`
 - `project.session_id`: fixed id or `auto_timestamp`
 - `project.out_dir`: output root; session subdirectory is created automatically
+
+### `fixed_fps`
+- `fixed_fps`: optional global fixed FPS (Hz)
+  - When set, it overrides camera realtime cadence and recording writer FPS selection.
+  - Offline analysis also uses this fixed timebase unless CLI override is given.
 
 ### `camera`
 - `camera.source`: camera index (`0`) or video path/URL
@@ -295,6 +302,13 @@ Note: always replace any machine-specific paths with your own absolute paths.
   - Writer FPS selection order: `preview_recording.fps` -> `camera.fps_target` -> camera reported FPS -> `30`.
 - `preview_recording.overlay`: save annotated frame (`true`) or raw frame (`false`)
 
+### `raw_recording`
+- `raw_recording.enabled`: save an additional raw stream (no overlays)
+- `raw_recording.filename`: relative path is resolved under session dir
+- `raw_recording.codec`: 4-char codec (e.g. `mp4v`)
+- `raw_recording.fps`: optional explicit writer FPS override
+  - Writer FPS selection order: `raw_recording.fps` -> `camera.fps_target` -> camera reported FPS -> `30`.
+
 ### `runtime_logging`
 - `runtime_logging.enabled`
 - `runtime_logging.issue_events_file`
@@ -310,6 +324,7 @@ project:
   name: cpp_dlc_live
   session_id: auto_timestamp
   out_dir: D:/data/cpp_runs
+fixed_fps: null
 
 camera:
   source: C:/data/videos/test.avi
@@ -362,6 +377,12 @@ preview_recording:
   fps: 30
   overlay: true
 
+raw_recording:
+  enabled: true
+  filename: raw_video.mp4
+  codec: mp4v
+  fps: 30
+
 runtime_logging:
   enabled: true
   issue_events_file: issue_events.jsonl
@@ -385,10 +406,12 @@ Common options:
 - `--out_dir /path/to/output_root`
 - `--duration_s 600`
 - `--camera_source 0` (or video path/URL)
+- `--fixed_fps 30`
 - `--no_preview` (disable window display)
 
 Notes:
 - `preview_recording.enabled=true` can still record video even when `--no_preview` is used.
+- Set both `preview_recording.enabled=true` and `raw_recording.enabled=true` to save both overlay and raw videos simultaneously.
 - On input video EOF, run exits normally.
 
 ## 2) `analyze_session`
@@ -399,6 +422,7 @@ cpp-dlc-live analyze_session --session_dir data/session_20260226_120000
 
 Options:
 - `--cm_per_px 0.05`
+- `--fixed_fps 30`
 - `--fixed_fps_hz 30`
 - `--no_plots`
 
@@ -467,6 +491,7 @@ Each session directory includes (depending on command and options):
 - `config_used.yaml`: exact runtime config copy
 - `run.log`: readable runtime log
 - `preview_overlay.mp4` (configurable): preview recording output when enabled
+- `raw_video.mp4` (configurable): raw recording output when enabled
 - `issue_events.jsonl`: structured issue/event stream
 - `incident_report_*.json`: runtime exception report snapshots
 - `summary.csv`: offline analysis summary
