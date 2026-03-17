@@ -19,7 +19,7 @@ from cpp_dlc_live.realtime.dlc_runtime import RuntimeBase, build_runtime
 from cpp_dlc_live.realtime.issue_logger import SessionIssueLogger
 from cpp_dlc_live.realtime.recorder import CSVRecorder
 from cpp_dlc_live.realtime.roi import ChamberROI
-from cpp_dlc_live.utils.io_utils import file_sha256, save_json
+from cpp_dlc_live.utils.io_utils import ensure_prefixed_filename, file_sha256, save_json
 from cpp_dlc_live.utils.time_utils import utc_now_iso
 
 
@@ -31,6 +31,7 @@ class RealtimeApp:
         duration_s: Optional[float] = None,
         camera_source_override: Optional[Union[int, str]] = None,
         preview: bool = True,
+        file_prefix: Optional[str] = None,
         logger: Optional[logging.Logger] = None,
     ):
         self.config = config
@@ -38,6 +39,8 @@ class RealtimeApp:
         self.duration_s = duration_s
         self.camera_source_override = camera_source_override
         self.preview = preview
+        project_cfg = config.get("project", {}) if isinstance(config.get("project", {}), dict) else {}
+        self.file_prefix = str(file_prefix or project_cfg.get("resolved_file_prefix") or "session")
         self.logger = logger or logging.getLogger("cpp_dlc_live")
         self._eof_is_normal_stop = False
 
@@ -76,8 +79,11 @@ class RealtimeApp:
             "start_wall": start_wall,
             "session_dir": str(self.session_dir),
             "config": self.config,
+            "file_prefix": self.file_prefix,
         }
-        cfg_used = self.session_dir / "config_used.yaml"
+        cfg_used = self.session_dir / self._prefixed_filename("config_used.yaml")
+        if not cfg_used.exists():
+            cfg_used = self.session_dir / "config_used.yaml"
         if cfg_used.exists():
             metadata["config_copy"] = str(cfg_used)
             metadata["config_sha256"] = file_sha256(cfg_used)
@@ -85,7 +91,10 @@ class RealtimeApp:
         raw_runtime_log_cfg = self.config.get("runtime_logging", {})
         runtime_log_cfg = dict(raw_runtime_log_cfg) if isinstance(raw_runtime_log_cfg, dict) else {}
         issue_enabled = bool(runtime_log_cfg.get("enabled", True))
-        issue_events_file = str(runtime_log_cfg.get("issue_events_file", "issue_events.jsonl"))
+        issue_events_file = ensure_prefixed_filename(
+            str(runtime_log_cfg.get("issue_events_file", "issue_events.jsonl")),
+            self.file_prefix,
+        )
         heartbeat_interval_s = max(0.0, float(runtime_log_cfg.get("heartbeat_interval_s", 5.0)))
         low_conf_warn_every_n = max(1, int(runtime_log_cfg.get("low_conf_warn_every_n", 30)))
         inference_warn_ms = float(runtime_log_cfg.get("inference_warn_ms", 80.0))
@@ -112,7 +121,10 @@ class RealtimeApp:
         )
         preview_record_requested = bool(preview_record_cfg.get("enabled", False))
         preview_record_enabled = preview_record_requested
-        preview_filename = str(preview_record_cfg.get("filename", "preview_overlay.mp4"))
+        preview_filename = ensure_prefixed_filename(
+            str(preview_record_cfg.get("filename", "preview_overlay.mp4")),
+            self.file_prefix,
+        )
         preview_codec_raw = str(preview_record_cfg.get("codec", "mp4v")).strip()
         preview_codec = preview_codec_raw if len(preview_codec_raw) == 4 else "mp4v"
         preview_fps_override = _optional_float(preview_record_cfg.get("fps"))
@@ -134,7 +146,10 @@ class RealtimeApp:
         raw_record_cfg = dict(raw_record_cfg_raw) if isinstance(raw_record_cfg_raw, dict) else {}
         raw_record_requested = bool(raw_record_cfg.get("enabled", False))
         raw_record_enabled = raw_record_requested
-        raw_filename = str(raw_record_cfg.get("filename", "raw_video.mp4"))
+        raw_filename = ensure_prefixed_filename(
+            str(raw_record_cfg.get("filename", "raw_video.mp4")),
+            self.file_prefix,
+        )
         raw_codec_raw = str(raw_record_cfg.get("codec", "mp4v")).strip()
         raw_codec = raw_codec_raw if len(raw_codec_raw) == 4 else "mp4v"
         raw_fps_override = _optional_float(raw_record_cfg.get("fps"))
@@ -177,7 +192,7 @@ class RealtimeApp:
             )
 
             recorder = CSVRecorder(
-                self.session_dir / "cpp_realtime_log.csv",
+                self.session_dir / self._prefixed_filename("cpp_realtime_log.csv"),
                 fieldnames=[
                     "t_wall",
                     "frame_idx",
@@ -720,8 +735,9 @@ class RealtimeApp:
                     "last_context": last_context,
                 }
             )
-            save_json(metadata, self.session_dir / "metadata.json")
-            self.logger.info("Session metadata written: %s", self.session_dir / "metadata.json")
+            metadata_path = self.session_dir / self._prefixed_filename("metadata.json")
+            save_json(metadata, metadata_path)
+            self.logger.info("Session metadata written: %s", metadata_path)
             if issue_logger is not None:
                 issue_logger.log(
                     "session_end",
@@ -903,12 +919,16 @@ class RealtimeApp:
             "camera_source_override": self.camera_source_override,
             "session_dir": str(self.session_dir),
         }
-        path = self.session_dir / f"incident_report_{time.strftime('%Y%m%d_%H%M%S')}.json"
+        base = f"incident_report_{time.strftime('%Y%m%d_%H%M%S')}.json"
+        path = self.session_dir / self._prefixed_filename(base)
         try:
             save_json(report, path)
             self.logger.error("Incident report written: %s", path)
         except Exception:
             self.logger.exception("Failed to write incident report")
+
+    def _prefixed_filename(self, base_name: str) -> str:
+        return ensure_prefixed_filename(base_name, self.file_prefix)
 
 
 def _optional_int(v: Any) -> Optional[int]:

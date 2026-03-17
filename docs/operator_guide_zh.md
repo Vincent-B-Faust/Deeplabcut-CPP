@@ -142,6 +142,9 @@ python -m cpp_dlc_live.cli run_realtime \
 4. `--no_preview`：无显示环境时关闭窗口。
 5. 即使 `--no_preview`，只要 `preview_recording.enabled=true` 仍会保存视频。
 6. 同时设置 `preview_recording.enabled=true` 和 `raw_recording.enabled=true` 可同时保存“带标注视频 + 原始视频”。
+7. 运行前会弹窗输入：小鼠编号、实验组别、实验时长（带历史下拉）。
+8. 可用 `--mouse_id`、`--group`、`--experiment_duration_s` 预填。
+9. 无弹窗模式可加 `--no_session_prompt`（需同时提供以上字段）。
 
 结束方式：
 1. 预览窗口按 `q` 或 `Esc`。
@@ -212,18 +215,18 @@ python -m cpp_dlc_live.cli analyze_issues \
 ## 6. 输出文件怎么解读
 
 每个 session 目录至少有：
-1. `cpp_realtime_log.csv`：逐帧日志。
-2. `metadata.json`：实验元数据。
-3. `config_used.yaml`：当次配置快照。
-4. `run.log`：运行日志。
-5. `preview_overlay.mp4`：预览视频（开启 `preview_recording` 时生成，文件名可配置）。
-6. `raw_video.mp4`：原始视频（开启 `raw_recording` 时生成，文件名可配置）。
-7. `issue_events.jsonl`：结构化问题日志（事件流）。
-8. `incident_report_*.json`：异常报告（发生异常时生成）。
-9. `summary.csv`：离线统计结果。
-10. `issue_summary.csv`：问题事件计数汇总（执行 `analyze_issues` 后生成）。
-11. `issue_timeline.csv`：问题时间线（执行 `analyze_issues` 后生成）。
-12. `incident_summary.csv`：异常摘要（执行 `analyze_issues` 后生成）。
+1. `<session_id>_cpp_realtime_log.csv`：逐帧日志。
+2. `<session_id>_metadata.json`：实验元数据。
+3. `<session_id>_config_used.yaml`：当次配置快照。
+4. `<session_id>_run.log`：运行日志。
+5. `<session_id>_preview_overlay.mp4`：预览视频（开启 `preview_recording` 时生成，文件名可配置）。
+6. `<session_id>_raw_video.mp4`：原始视频（开启 `raw_recording` 时生成，文件名可配置）。
+7. `<session_id>_issue_events.jsonl`：结构化问题日志（事件流）。
+8. `<session_id>_incident_report_*.json`：异常报告（发生异常时生成）。
+9. `<session_id>_summary.csv`：离线统计结果。
+10. `<session_id>_issue_summary.csv`：问题事件计数汇总（执行 `analyze_issues` 后生成）。
+11. `<session_id>_issue_timeline.csv`：问题时间线（执行 `analyze_issues` 后生成）。
+12. `<session_id>_incident_summary.csv`：异常摘要（执行 `analyze_issues` 后生成）。
 
 ## 6.1 `summary.csv` 核心字段
 

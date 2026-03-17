@@ -8,6 +8,8 @@ from typing import Any, Dict, List, Optional
 
 import pandas as pd
 
+from cpp_dlc_live.utils.io_utils import detect_session_file_prefix, ensure_prefixed_filename, resolve_session_file
+
 
 def analyze_issues(
     session_dir: Path,
@@ -30,9 +32,18 @@ def analyze_issues(
     issue_summary_df = _build_issue_summary(timeline_df)
     incident_summary_df = _build_incident_summary(session_dir, logger=logger)
 
-    timeline_path = session_dir / "issue_timeline.csv"
-    issue_summary_path = session_dir / "issue_summary.csv"
-    incident_summary_path = session_dir / "incident_summary.csv"
+    file_prefix = _resolve_file_prefix(session_dir, metadata)
+    timeline_name = ensure_prefixed_filename("issue_timeline.csv", file_prefix) if file_prefix else "issue_timeline.csv"
+    issue_summary_name = (
+        ensure_prefixed_filename("issue_summary.csv", file_prefix) if file_prefix else "issue_summary.csv"
+    )
+    incident_summary_name = (
+        ensure_prefixed_filename("incident_summary.csv", file_prefix) if file_prefix else "incident_summary.csv"
+    )
+
+    timeline_path = session_dir / timeline_name
+    issue_summary_path = session_dir / issue_summary_name
+    incident_summary_path = session_dir / incident_summary_name
 
     timeline_df.to_csv(timeline_path, index=False)
     issue_summary_df.to_csv(issue_summary_path, index=False)
@@ -50,7 +61,7 @@ def analyze_issues(
 
 
 def _load_metadata(session_dir: Path) -> Dict[str, Any]:
-    path = session_dir / "metadata.json"
+    path = resolve_session_file(session_dir, "metadata.json")
     if not path.exists():
         return {}
     try:
@@ -84,7 +95,11 @@ def _resolve_issue_events_path(
             issue_path = Path(str(issue_file))
             return issue_path if issue_path.is_absolute() else session_dir / issue_path
 
-    return session_dir / "issue_events.jsonl"
+    fallback = "issue_events.jsonl"
+    prefix = detect_session_file_prefix(session_dir)
+    if prefix:
+        fallback = ensure_prefixed_filename(fallback, prefix)
+    return session_dir / fallback
 
 
 def _read_issue_events(issue_path: Path, logger: logging.Logger) -> List[Dict[str, Any]]:
@@ -239,7 +254,9 @@ def _build_incident_summary(session_dir: Path, logger: logging.Logger) -> pd.Dat
     ]
     rows: List[Dict[str, Any]] = []
 
-    for path in sorted(session_dir.glob("incident_report_*.json")):
+    incident_files = list(session_dir.glob("incident_report_*.json"))
+    incident_files.extend(session_dir.glob("*_incident_report_*.json"))
+    for path in sorted(set(incident_files)):
         try:
             with path.open("r", encoding="utf-8") as f:
                 payload = json.load(f)
@@ -287,6 +304,13 @@ def _build_incident_summary(session_dir: Path, logger: logging.Logger) -> pd.Dat
         )
 
     return pd.DataFrame(rows, columns=columns)
+
+
+def _resolve_file_prefix(session_dir: Path, metadata: Dict[str, Any]) -> Optional[str]:
+    prefix = metadata.get("file_prefix")
+    if prefix:
+        return str(prefix)
+    return detect_session_file_prefix(session_dir)
 
 
 def _epoch_to_utc(ts: Optional[float]) -> Optional[str]:

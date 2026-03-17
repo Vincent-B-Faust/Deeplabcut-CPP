@@ -8,7 +8,12 @@ import pandas as pd
 
 from cpp_dlc_live.analysis.metrics import compute_speed_series, compute_summary
 from cpp_dlc_live.analysis.plots import plot_occupancy, plot_speed, plot_trajectory
-from cpp_dlc_live.utils.io_utils import load_yaml
+from cpp_dlc_live.utils.io_utils import (
+    detect_session_file_prefix,
+    ensure_prefixed_filename,
+    load_yaml,
+    resolve_session_file,
+)
 
 
 def analyze_session(
@@ -21,12 +26,12 @@ def analyze_session(
     logger = logger or logging.getLogger("cpp_dlc_live")
     session_dir = Path(session_dir)
 
-    log_path = session_dir / "cpp_realtime_log.csv"
+    log_path = resolve_session_file(session_dir, "cpp_realtime_log.csv")
     if not log_path.exists():
         raise FileNotFoundError(f"Missing realtime log: {log_path}")
 
     config = {}
-    config_path = session_dir / "config_used.yaml"
+    config_path = resolve_session_file(session_dir, "config_used.yaml")
     if config_path.exists():
         config = load_yaml(config_path)
 
@@ -55,7 +60,9 @@ def analyze_session(
     df = pd.read_csv(log_path)
     summary = compute_summary(df, cm_per_px=cm_per_px, fixed_fps_hz=fixed_fps_hz)
 
-    summary_path = session_dir / "summary.csv"
+    file_prefix = detect_session_file_prefix(session_dir)
+    summary_name = ensure_prefixed_filename("summary.csv", file_prefix) if file_prefix else "summary.csv"
+    summary_path = session_dir / summary_name
     pd.DataFrame([summary]).to_csv(summary_path, index=False)
     logger.info("Summary written: %s", summary_path)
     if fixed_fps_hz is not None:
@@ -65,9 +72,22 @@ def analyze_session(
         try:
             speed_df = compute_speed_series(df, fixed_fps_hz=fixed_fps_hz)
             roi_cfg = config.get("roi", {}) if isinstance(config, dict) else {}
-            plot_trajectory(df, roi_cfg=roi_cfg, out_path=session_dir / "trajectory.png")
-            plot_speed(speed_df, out_path=session_dir / "speed_over_time.png")
-            plot_occupancy(df, out_path=session_dir / "occupancy_over_time.png")
+            trajectory_name = (
+                ensure_prefixed_filename("trajectory.png", file_prefix) if file_prefix else "trajectory.png"
+            )
+            speed_name = (
+                ensure_prefixed_filename("speed_over_time.png", file_prefix)
+                if file_prefix
+                else "speed_over_time.png"
+            )
+            occupancy_name = (
+                ensure_prefixed_filename("occupancy_over_time.png", file_prefix)
+                if file_prefix
+                else "occupancy_over_time.png"
+            )
+            plot_trajectory(df, roi_cfg=roi_cfg, out_path=session_dir / trajectory_name)
+            plot_speed(speed_df, out_path=session_dir / speed_name)
+            plot_occupancy(df, out_path=session_dir / occupancy_name)
             logger.info("Plots written under %s", session_dir)
         except Exception:
             logger.exception("Failed to generate plots")

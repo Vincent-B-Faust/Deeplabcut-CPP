@@ -238,6 +238,7 @@ Note: always replace any machine-specific paths with your own absolute paths.
 
 - `project`: session naming and output location
 - `fixed_fps`: optional global fixed FPS for runtime + recording + analysis
+- `session_info`: mouse/group/planned duration metadata (used by naming prompt)
 - `camera`: source and transform options
 - `dlc`: model path/backend/bodypart/confidence/smoothing
 - `roi`: chamber polygons/rectangles + neutral policy + debounce
@@ -257,6 +258,12 @@ Note: always replace any machine-specific paths with your own absolute paths.
 - `fixed_fps`: optional global fixed FPS (Hz)
   - When set, it overrides camera realtime cadence and recording writer FPS selection.
   - Offline analysis also uses this fixed timebase unless CLI override is given.
+
+### `session_info`
+- `session_info.mouse_id`: mouse identifier
+- `session_info.group`: group label
+- `session_info.experiment_duration_s`: planned duration in seconds
+- `run_realtime` opens a popup before start (with history dropdowns) to confirm/edit these values.
 
 ### `camera`
 - `camera.source`: camera index (`0`) or video path/URL
@@ -328,6 +335,10 @@ project:
   session_id: auto_timestamp
   out_dir: D:/data/cpp_runs
 fixed_fps: null
+session_info:
+  mouse_id: M001
+  group: Control
+  experiment_duration_s: 600
 
 camera:
   source: C:/data/videos/test.avi
@@ -414,11 +425,17 @@ Common options:
 - `--camera_source 0` (or video path/URL)
 - `--fixed_fps 30`
 - `--no_preview` (disable window display)
+- `--mouse_id M001`
+- `--group Control`
+- `--experiment_duration_s 600`
+- `--no_session_prompt` (skip popup and use provided values)
 
 Notes:
 - `preview_recording.enabled=true` can still record video even when `--no_preview` is used.
 - Set both `preview_recording.enabled=true` and `raw_recording.enabled=true` to save both overlay and raw videos simultaneously.
 - On input video EOF, run exits normally.
+- Session folder name is expanded to include `timestamp + mouse_id + group + duration`.
+- Output files are prefixed with resolved session id.
 
 ## 2) `analyze_session`
 
@@ -502,17 +519,17 @@ When using camera input (not `--image`), `calibrate_roi` can now update both ROI
 
 Each session directory includes (depending on command and options):
 
-- `cpp_realtime_log.csv`: frame-level runtime records
-- `metadata.json`: run metadata + runtime stats + config hash + preview recording result
-- `config_used.yaml`: exact runtime config copy
-- `run.log`: readable runtime log
-- `preview_overlay.mp4` (configurable): preview recording output when enabled
-- `raw_video.mp4` (configurable): raw recording output when enabled
-- `issue_events.jsonl`: structured issue/event stream
-- `incident_report_*.json`: runtime exception report snapshots
-- `summary.csv`: offline analysis summary
-- `trajectory.png`, `speed_over_time.png`, `occupancy_over_time.png` (if plot output enabled)
-- `issue_summary.csv`, `issue_timeline.csv`, `incident_summary.csv` (from `analyze_issues`)
+- `<session_id>_cpp_realtime_log.csv`: frame-level runtime records
+- `<session_id>_metadata.json`: run metadata + runtime stats + config hash + preview recording result
+- `<session_id>_config_used.yaml`: exact runtime config copy
+- `<session_id>_run.log`: readable runtime log
+- `<session_id>_preview_overlay.mp4` (configurable): preview recording output when enabled
+- `<session_id>_raw_video.mp4` (configurable): raw recording output when enabled
+- `<session_id>_issue_events.jsonl`: structured issue/event stream
+- `<session_id>_incident_report_*.json`: runtime exception report snapshots
+- `<session_id>_summary.csv`: offline analysis summary
+- `<session_id>_trajectory.png`, `<session_id>_speed_over_time.png`, `<session_id>_occupancy_over_time.png` (if plot output enabled)
+- `<session_id>_issue_summary.csv`, `<session_id>_issue_timeline.csv`, `<session_id>_incident_summary.csv` (from `analyze_issues`)
 
 ## Core columns in `cpp_realtime_log.csv`
 
