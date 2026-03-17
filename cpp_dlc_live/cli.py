@@ -3,9 +3,10 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 
 import cv2
+import pandas as pd
 
 from cpp_dlc_live.analysis.analyze import analyze_session
 from cpp_dlc_live.analysis.issues import analyze_issues
@@ -37,6 +38,9 @@ def main(argv: Optional[list[str]] = None) -> None:
         return
     if args.command == "analyze_issues":
         _cmd_analyze_issues(args)
+        return
+    if args.command == "analyze_batch":
+        _cmd_analyze_batch(args)
         return
     if args.command == "calibrate_roi":
         _cmd_calibrate_roi(args)
@@ -84,6 +88,21 @@ def _build_parser() -> argparse.ArgumentParser:
         "--issue_file",
         default=None,
         help="Optional issue events JSONL path (absolute or relative to session_dir)",
+    )
+
+    p_batch = sub.add_parser("analyze_batch", help="Batch analyze all session folders under a root directory")
+    p_batch.add_argument("--root_dir", required=True, help="Root directory containing session subfolders")
+    p_batch.add_argument("--recursive", action="store_true", help="Recursively scan subdirectories")
+    p_batch.add_argument("--cm_per_px", type=float, default=None, help="Override cm_per_px for all sessions")
+    p_batch.add_argument("--fixed_fps", type=float, default=None, help="Use fixed FPS timebase for all sessions")
+    p_batch.add_argument("--fixed_fps_hz", type=float, default=None, help="Legacy fixed FPS option")
+    p_batch.add_argument("--no_plots", action="store_true", help="Disable plot generation for all sessions")
+    p_batch.add_argument("--include_issues", action="store_true", help="Also run analyze_issues for each session")
+    p_batch.add_argument("--fail_fast", action="store_true", help="Stop at first failed session")
+    p_batch.add_argument(
+        "--report_name",
+        default="batch_analysis_report.csv",
+        help="Output CSV report filename under root_dir",
     )
 
     p_cal = sub.add_parser("calibrate_roi", help="Interactive ROI calibrator")
@@ -140,14 +159,17 @@ def _cmd_run_realtime(args: argparse.Namespace) -> None:
     auto_analyze = bool(analysis_cfg.get("auto_after_run", True)) and (not bool(args.no_auto_analyze))
     if auto_analyze:
         logger.info("Auto analysis started for session: %s", session_dir)
-        summary_path = analyze_session(
-            session_dir=session_dir,
-            cm_per_px_override=None,
-            fixed_fps_hz_override=None,
-            output_plots_override=True,
-            logger=logger,
-        )
-        logger.info("Auto analysis finished: %s", summary_path)
+        try:
+            summary_path = analyze_session(
+                session_dir=session_dir,
+                cm_per_px_override=None,
+                fixed_fps_hz_override=None,
+                output_plots_override=True,
+                logger=logger,
+            )
+            logger.info("Auto analysis finished: %s", summary_path)
+        except Exception:
+            logger.exception("Auto analysis failed for session: %s", session_dir)
 
 
 def _cmd_analyze_session(args: argparse.Namespace) -> None:
@@ -175,6 +197,68 @@ def _cmd_analyze_issues(args: argparse.Namespace) -> None:
     print(outputs["issue_summary"])
     print(outputs["issue_timeline"])
     print(outputs["incident_summary"])
+
+
+def _cmd_analyze_batch(args: argparse.Namespace) -> None:
+    root_dir = Path(args.root_dir)
+    if not root_dir.exists():
+        raise FileNotFoundError(f"Root directory not found: {root_dir}")
+
+    session_dirs = _discover_session_dirs(root_dir=root_dir, recursive=bool(args.recursive))
+    if not session_dirs:
+        raise RuntimeError(f"No valid session folder found under: {root_dir}")
+
+    rows: List[Dict[str, Any]] = []
+    failed = 0
+
+    for session_dir in session_dirs:
+        logger = setup_logging(session_dir, file_prefix=detect_session_file_prefix(session_dir))
+        logger.info("Batch analyze started: %s", session_dir)
+        row: Dict[str, Any] = {
+            "session_dir": str(session_dir),
+            "status": "ok",
+            "summary_path": "",
+            "issue_summary_path": "",
+            "issue_timeline_path": "",
+            "incident_summary_path": "",
+            "error": "",
+        }
+        try:
+            summary_path = analyze_session(
+                session_dir=session_dir,
+                cm_per_px_override=args.cm_per_px,
+                fixed_fps_hz_override=(args.fixed_fps if args.fixed_fps is not None else args.fixed_fps_hz),
+                output_plots_override=(False if args.no_plots else None),
+                logger=logger,
+            )
+            row["summary_path"] = str(summary_path)
+
+            if bool(args.include_issues):
+                issue_outputs = analyze_issues(session_dir=session_dir, logger=logger)
+                row["issue_summary_path"] = str(issue_outputs["issue_summary"])
+                row["issue_timeline_path"] = str(issue_outputs["issue_timeline"])
+                row["incident_summary_path"] = str(issue_outputs["incident_summary"])
+
+            logger.info("Batch analyze finished: %s", session_dir)
+        except Exception as exc:
+            failed += 1
+            row["status"] = "failed"
+            row["error"] = f"{type(exc).__name__}: {exc}"
+            logger.exception("Batch analyze failed: %s", session_dir)
+            if bool(args.fail_fast):
+                rows.append(row)
+                report_path = root_dir / str(args.report_name)
+                pd.DataFrame(rows).to_csv(report_path, index=False)
+                print(report_path)
+                raise
+
+        rows.append(row)
+
+    report_path = root_dir / str(args.report_name)
+    pd.DataFrame(rows).to_csv(report_path, index=False)
+    print(report_path)
+    if failed > 0:
+        raise SystemExit(2)
 
 
 def _cmd_calibrate_roi(args: argparse.Namespace) -> None:
@@ -252,6 +336,31 @@ def _parse_source(raw: Union[str, int, None]) -> Union[str, int]:
     if text.isdigit():
         return int(text)
     return text
+
+
+def _is_session_dir(path: Path) -> bool:
+    if not path.is_dir():
+        return False
+    direct = path / "cpp_realtime_log.csv"
+    if direct.exists():
+        return True
+    prefixed = list(path.glob("*_cpp_realtime_log.csv"))
+    return len(prefixed) > 0
+
+
+def _discover_session_dirs(root_dir: Path, recursive: bool) -> List[Path]:
+    candidates: List[Path] = []
+    if _is_session_dir(root_dir):
+        candidates.append(root_dir)
+
+    iterator = root_dir.rglob("*") if recursive else root_dir.iterdir()
+    for path in iterator:
+        if path.is_dir() and _is_session_dir(path):
+            candidates.append(path)
+
+    # Deduplicate while preserving stable sorted order.
+    unique = sorted({p.resolve() for p in candidates})
+    return [Path(p) for p in unique]
 
 
 def _resolve_session_info(config: Dict[str, Any], args: argparse.Namespace) -> Dict[str, Any]:

@@ -102,7 +102,7 @@ python -m cpp_dlc_live.cli --help
 3. `codec`：OpenCV FourCC（默认 `mp4v`）。
 4. `fps`：写出帧率，留空会自动用相机 FPS/目标 FPS。
 
-## 4. 四条命令怎么用
+## 4. 五条命令怎么用
 
 ## 4.1 ROI 标定（先做）
 
@@ -179,6 +179,22 @@ python -m cpp_dlc_live.cli analyze_issues \
 1. `issue_summary.csv`：按事件类型和级别统计计数。
 2. `issue_timeline.csv`：按时间展开的标准化事件流。
 3. `incident_summary.csv`：异常报告摘要（由 `incident_report_*.json` 汇总）。
+
+## 4.5 批量自动分析（目录下全部 session）
+
+```bash
+python -m cpp_dlc_live.cli analyze_batch \
+  --root_dir data \
+  --recursive
+```
+
+可选：
+1. `--cm_per_px 0.05`：统一覆盖比例尺。
+2. `--fixed_fps 30`：统一固定 FPS 时间基准。
+3. `--no_plots`：只导出 summary，不出图。
+4. `--include_issues`：同时执行 `analyze_issues`。
+5. `--report_name batch_analysis_report.csv`：批处理报告文件名。
+6. `--fail_fast`：遇到首个失败 session 立即停止。
 
 ## 5. 标准操作流程（SOP）
 

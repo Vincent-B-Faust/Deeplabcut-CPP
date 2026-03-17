@@ -467,7 +467,25 @@ Outputs:
 - `issue_timeline.csv`
 - `incident_summary.csv`
 
-## 4) `calibrate_roi`
+## 4) `analyze_batch`
+
+```bash
+cpp-dlc-live analyze_batch --root_dir data --recursive
+```
+
+Options:
+- `--cm_per_px 0.05`
+- `--fixed_fps 30`
+- `--fixed_fps_hz 30`
+- `--no_plots`
+- `--include_issues`
+- `--fail_fast`
+- `--report_name batch_analysis_report.csv`
+
+Output:
+- a report CSV under `root_dir` (default `batch_analysis_report.csv`) with per-session status and generated paths.
+
+## 5) `calibrate_roi`
 
 ```bash
 cpp-dlc-live calibrate_roi --config config/config_example.yaml --camera_source 0
