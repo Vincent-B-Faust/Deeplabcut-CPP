@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import json
 import logging
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Tuple
 
 import pandas as pd
 
@@ -78,6 +79,7 @@ def analyze_session(
         try:
             speed_df = compute_speed_series(df, fixed_fps_hz=fixed_fps_hz)
             roi_cfg = config.get("roi", {}) if isinstance(config, dict) else {}
+            frame_shape = _resolve_frame_shape(session_dir=session_dir, config=config, logger=logger)
             fig1_name = (
                 ensure_prefixed_filename("figure1_trajectory_speed_heatmap.png", file_prefix)
                 if file_prefix
@@ -108,8 +110,9 @@ def analyze_session(
                 speed_df=speed_df,
                 roi_cfg=roi_cfg,
                 out_path=session_dir / fig1_name,
+                frame_shape=frame_shape,
             )
-            plot_position_heatmap(df=df, roi_cfg=roi_cfg, out_path=session_dir / fig2_name)
+            plot_position_heatmap(df=df, roi_cfg=roi_cfg, out_path=session_dir / fig2_name, frame_shape=frame_shape)
             plot_chamber_time_bars(df=df, out_path=session_dir / fig3_name, fixed_fps_hz=fixed_fps_hz)
             plot_speed(speed_df, out_path=session_dir / speed_name)
             plot_occupancy(df, out_path=session_dir / occupancy_name)
@@ -127,3 +130,41 @@ def _coerce_optional_positive_float(value: object, field_name: str) -> Optional[
     if parsed <= 0:
         raise ValueError(f"{field_name} must be > 0")
     return parsed
+
+
+def _coerce_optional_positive_int(value: object) -> Optional[int]:
+    if value is None:
+        return None
+    parsed = int(value)
+    if parsed <= 0:
+        return None
+    return parsed
+
+
+def _resolve_frame_shape(
+    session_dir: Path,
+    config: dict,
+    logger: logging.Logger,
+) -> Optional[Tuple[int, int]]:
+    metadata_path = resolve_session_file(session_dir, "metadata.json")
+    if metadata_path.exists():
+        try:
+            with metadata_path.open("r", encoding="utf-8") as f:
+                metadata = json.load(f)
+            if isinstance(metadata, dict):
+                camera_meta = metadata.get("camera", {})
+                if isinstance(camera_meta, dict):
+                    width = _coerce_optional_positive_int(camera_meta.get("width"))
+                    height = _coerce_optional_positive_int(camera_meta.get("height"))
+                    if width is not None and height is not None:
+                        return (width, height)
+        except Exception:
+            logger.exception("Failed to read metadata for plot frame size: %s", metadata_path)
+
+    camera_cfg = config.get("camera", {}) if isinstance(config, dict) else {}
+    if isinstance(camera_cfg, dict):
+        width = _coerce_optional_positive_int(camera_cfg.get("width"))
+        height = _coerce_optional_positive_int(camera_cfg.get("height"))
+        if width is not None and height is not None:
+            return (width, height)
+    return None

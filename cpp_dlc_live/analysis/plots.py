@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
+import matplotlib
+# Use a non-interactive backend so auto-analysis works reliably in headless/GUI-mixed runs.
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -11,23 +14,36 @@ from matplotlib.colors import Normalize
 
 from cpp_dlc_live.analysis.metrics import compute_dt_seconds
 
+FrameShape = Optional[Tuple[int, int]]
 
-def plot_trajectory(df: pd.DataFrame, roi_cfg: Optional[Dict[str, Any]], out_path: Path) -> None:
+
+def plot_trajectory(
+    df: pd.DataFrame,
+    roi_cfg: Optional[Dict[str, Any]],
+    out_path: Path,
+    frame_shape: FrameShape = None,
+) -> None:
     """Legacy plain trajectory plot kept for backward compatibility."""
     x = pd.to_numeric(df.get("x"), errors="coerce")
     y = pd.to_numeric(df.get("y"), errors="coerce")
 
-    fig, ax = plt.subplots(figsize=(8, 6))
+    fig, ax = plt.subplots(figsize=_spatial_figsize(frame_shape))
     ax.plot(x, y, lw=1.0, alpha=0.8, color="tab:blue")
     ax.set_title("Trajectory")
     ax.set_xlabel("x (px)")
     ax.set_ylabel("y (px)")
-    ax.invert_yaxis()
 
     if roi_cfg:
         _draw_roi(ax, roi_cfg.get("chamber1"), "tab:green", "ch1")
         _draw_roi(ax, roi_cfg.get("chamber2"), "tab:orange", "ch2")
         _draw_roi(ax, roi_cfg.get("neutral"), "tab:gray", "neutral")
+    _apply_spatial_axes(
+        ax=ax,
+        frame_shape=frame_shape,
+        x_values=pd.to_numeric(x, errors="coerce").to_numpy(dtype=float),
+        y_values=pd.to_numeric(y, errors="coerce").to_numpy(dtype=float),
+        roi_cfg=roi_cfg,
+    )
 
     ax.legend(loc="best")
     fig.tight_layout()
@@ -40,23 +56,24 @@ def plot_trajectory_speed_heatmap(
     speed_df: pd.DataFrame,
     roi_cfg: Optional[Dict[str, Any]],
     out_path: Path,
+    frame_shape: FrameShape = None,
 ) -> None:
     """Figure 1: trajectory with segment color mapped to instantaneous speed."""
     x = pd.to_numeric(df.get("x"), errors="coerce").to_numpy(dtype=float)
     y = pd.to_numeric(df.get("y"), errors="coerce").to_numpy(dtype=float)
     speed = pd.to_numeric(speed_df.get("speed_px_s"), errors="coerce").to_numpy(dtype=float)
 
-    fig, ax = plt.subplots(figsize=(8, 6))
+    fig, ax = plt.subplots(figsize=_spatial_figsize(frame_shape))
     _draw_speed_colored_trajectory(ax=ax, x=x, y=y, speed=speed)
     ax.set_title("Figure 1: Trajectory Colored by Speed")
     ax.set_xlabel("x (px)")
     ax.set_ylabel("y (px)")
-    ax.invert_yaxis()
 
     if roi_cfg:
         _draw_roi(ax, roi_cfg.get("chamber1"), "tab:green", "ch1")
         _draw_roi(ax, roi_cfg.get("chamber2"), "tab:orange", "ch2")
         _draw_roi(ax, roi_cfg.get("neutral"), "tab:gray", "neutral")
+    _apply_spatial_axes(ax=ax, frame_shape=frame_shape, x_values=x, y_values=y, roi_cfg=roi_cfg)
     if ax.has_data():
         ax.legend(loc="best")
 
@@ -65,7 +82,12 @@ def plot_trajectory_speed_heatmap(
     plt.close(fig)
 
 
-def plot_position_heatmap(df: pd.DataFrame, roi_cfg: Optional[Dict[str, Any]], out_path: Path) -> None:
+def plot_position_heatmap(
+    df: pd.DataFrame,
+    roi_cfg: Optional[Dict[str, Any]],
+    out_path: Path,
+    frame_shape: FrameShape = None,
+) -> None:
     """Figure 2: 2D occupancy heatmap of positions."""
     x = pd.to_numeric(df.get("x"), errors="coerce").to_numpy(dtype=float)
     y = pd.to_numeric(df.get("y"), errors="coerce").to_numpy(dtype=float)
@@ -73,10 +95,16 @@ def plot_position_heatmap(df: pd.DataFrame, roi_cfg: Optional[Dict[str, Any]], o
     xv = x[valid]
     yv = y[valid]
 
-    fig, ax = plt.subplots(figsize=(8, 6))
+    fig, ax = plt.subplots(figsize=_spatial_figsize(frame_shape))
+    hist_range = None
+    if frame_shape is not None:
+        fw, fh = frame_shape
+        if fw > 0 and fh > 0:
+            hist_range = [[0.0, float(fw)], [0.0, float(fh)]]
+
     if xv.size > 0:
         bins = max(32, min(120, int(np.sqrt(xv.size))))
-        h = ax.hist2d(xv, yv, bins=bins, cmap="hot")
+        h = ax.hist2d(xv, yv, bins=bins, range=hist_range, cmap="hot")
         cbar = fig.colorbar(h[3], ax=ax)
         cbar.set_label("Counts")
     else:
@@ -85,12 +113,12 @@ def plot_position_heatmap(df: pd.DataFrame, roi_cfg: Optional[Dict[str, Any]], o
     ax.set_title("Figure 2: Position Heatmap")
     ax.set_xlabel("x (px)")
     ax.set_ylabel("y (px)")
-    ax.invert_yaxis()
 
     if roi_cfg:
         _draw_roi(ax, roi_cfg.get("chamber1"), "tab:green", "ch1")
         _draw_roi(ax, roi_cfg.get("chamber2"), "tab:orange", "ch2")
         _draw_roi(ax, roi_cfg.get("neutral"), "tab:gray", "neutral")
+    _apply_spatial_axes(ax=ax, frame_shape=frame_shape, x_values=x, y_values=y, roi_cfg=roi_cfg)
     if ax.has_data():
         ax.legend(loc="best")
 
@@ -215,3 +243,76 @@ def _draw_speed_colored_trajectory(ax: Any, x: np.ndarray, y: np.ndarray, speed:
 
     cbar = plt.colorbar(lc, ax=ax)
     cbar.set_label("Speed (px/s)")
+
+
+def _spatial_figsize(frame_shape: FrameShape) -> Tuple[float, float]:
+    if frame_shape is None:
+        return (8.0, 6.0)
+    width, height = frame_shape
+    if width <= 0 or height <= 0:
+        return (8.0, 6.0)
+    base_h = 6.0
+    ratio = float(width) / float(height)
+    fig_w = float(np.clip(base_h * ratio, 6.0, 12.0))
+    return (fig_w, base_h)
+
+
+def _apply_spatial_axes(
+    ax: Any,
+    frame_shape: FrameShape,
+    x_values: np.ndarray,
+    y_values: np.ndarray,
+    roi_cfg: Optional[Dict[str, Any]],
+) -> None:
+    if frame_shape is not None:
+        width, height = frame_shape
+        if width > 0 and height > 0:
+            ax.set_xlim(0.0, float(width))
+            ax.set_ylim(float(height), 0.0)
+            ax.set_aspect("equal", adjustable="box")
+            return
+
+    x_min, x_max, y_min, y_max = _infer_spatial_limits(x_values=x_values, y_values=y_values, roi_cfg=roi_cfg)
+    ax.set_xlim(x_min, x_max)
+    ax.set_ylim(y_max, y_min)
+    ax.set_aspect("equal", adjustable="box")
+
+
+def _infer_spatial_limits(
+    x_values: np.ndarray,
+    y_values: np.ndarray,
+    roi_cfg: Optional[Dict[str, Any]],
+) -> Tuple[float, float, float, float]:
+    xs: list[float] = []
+    ys: list[float] = []
+
+    valid = np.isfinite(x_values) & np.isfinite(y_values)
+    if np.any(valid):
+        xs.extend(x_values[valid].tolist())
+        ys.extend(y_values[valid].tolist())
+
+    if roi_cfg:
+        for key in ("chamber1", "chamber2", "neutral"):
+            pts = roi_cfg.get(key)
+            if not pts:
+                continue
+            arr = np.asarray(pts, dtype=float)
+            if arr.ndim != 2 or arr.shape[1] != 2:
+                continue
+            valid_roi = np.isfinite(arr[:, 0]) & np.isfinite(arr[:, 1])
+            if np.any(valid_roi):
+                xs.extend(arr[valid_roi, 0].tolist())
+                ys.extend(arr[valid_roi, 1].tolist())
+
+    if not xs or not ys:
+        return (0.0, 1.0, 0.0, 1.0)
+
+    x_min = float(np.min(xs))
+    x_max = float(np.max(xs))
+    y_min = float(np.min(ys))
+    y_max = float(np.max(ys))
+
+    # Keep a small margin so boundaries/markers are fully visible.
+    x_margin = max(1.0, 0.02 * max(1.0, x_max - x_min))
+    y_margin = max(1.0, 0.02 * max(1.0, y_max - y_min))
+    return (x_min - x_margin, x_max + x_margin, y_min - y_margin, y_max + y_margin)
