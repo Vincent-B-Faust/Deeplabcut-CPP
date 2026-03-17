@@ -89,6 +89,7 @@ laser_control:
   unknown_policy: 'off'
   fallback_to_dryrun: true
 analysis:
+  auto_after_run: true
   cm_per_px: null
   # Legacy per-analysis fixed FPS. Prefer top-level fixed_fps for unified behavior.
   fixed_fps_hz: null

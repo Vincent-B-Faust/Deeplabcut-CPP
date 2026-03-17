@@ -145,6 +145,7 @@ python -m cpp_dlc_live.cli run_realtime \
 7. 运行前会弹窗输入：小鼠编号、实验组别、实验时长（带历史下拉）。
 8. 可用 `--mouse_id`、`--group`、`--experiment_duration_s` 预填。
 9. 无弹窗模式可加 `--no_session_prompt`（需同时提供以上字段）。
+10. `--no_auto_analyze`：关闭实验结束后的自动分析与出图。
 
 结束方式：
 1. 预览窗口按 `q` 或 `Esc`。
@@ -207,7 +208,7 @@ python -m cpp_dlc_live.cli analyze_issues \
 
 ## 5.4 实验后
 
-1. 执行 `analyze_session`。
+1. 默认会自动执行 `analyze_session` 并生成 Figure1–Figure5。
 2. 需要排障时执行 `analyze_issues`。
 3. 归档 session 目录。
 4. 记录关键指标并备份。
@@ -227,6 +228,11 @@ python -m cpp_dlc_live.cli analyze_issues \
 10. `<session_id>_issue_summary.csv`：问题事件计数汇总（执行 `analyze_issues` 后生成）。
 11. `<session_id>_issue_timeline.csv`：问题时间线（执行 `analyze_issues` 后生成）。
 12. `<session_id>_incident_summary.csv`：异常摘要（执行 `analyze_issues` 后生成）。
+13. `<session_id>_figure1_trajectory_speed_heatmap.png`：轨迹图（颜色表示速度）。
+14. `<session_id>_figure2_position_heatmap.png`：位置热图。
+15. `<session_id>_figure3_chamber_dwell.png`：ch1/ch2 停留时长与百分比（上下两张柱状图）。
+16. `<session_id>_speed_over_time.png`：Figure4 速度随时间。
+17. `<session_id>_occupancy_over_time.png`：Figure5 区域占据随时间。
 
 ## 6.1 `summary.csv` 核心字段
 

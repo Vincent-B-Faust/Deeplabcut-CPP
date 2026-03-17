@@ -7,7 +7,13 @@ from typing import Optional
 import pandas as pd
 
 from cpp_dlc_live.analysis.metrics import compute_speed_series, compute_summary
-from cpp_dlc_live.analysis.plots import plot_occupancy, plot_speed, plot_trajectory
+from cpp_dlc_live.analysis.plots import (
+    plot_chamber_time_bars,
+    plot_occupancy,
+    plot_position_heatmap,
+    plot_speed,
+    plot_trajectory_speed_heatmap,
+)
 from cpp_dlc_live.utils.io_utils import (
     detect_session_file_prefix,
     ensure_prefixed_filename,
@@ -72,8 +78,20 @@ def analyze_session(
         try:
             speed_df = compute_speed_series(df, fixed_fps_hz=fixed_fps_hz)
             roi_cfg = config.get("roi", {}) if isinstance(config, dict) else {}
-            trajectory_name = (
-                ensure_prefixed_filename("trajectory.png", file_prefix) if file_prefix else "trajectory.png"
+            fig1_name = (
+                ensure_prefixed_filename("figure1_trajectory_speed_heatmap.png", file_prefix)
+                if file_prefix
+                else "figure1_trajectory_speed_heatmap.png"
+            )
+            fig2_name = (
+                ensure_prefixed_filename("figure2_position_heatmap.png", file_prefix)
+                if file_prefix
+                else "figure2_position_heatmap.png"
+            )
+            fig3_name = (
+                ensure_prefixed_filename("figure3_chamber_dwell.png", file_prefix)
+                if file_prefix
+                else "figure3_chamber_dwell.png"
             )
             speed_name = (
                 ensure_prefixed_filename("speed_over_time.png", file_prefix)
@@ -85,7 +103,14 @@ def analyze_session(
                 if file_prefix
                 else "occupancy_over_time.png"
             )
-            plot_trajectory(df, roi_cfg=roi_cfg, out_path=session_dir / trajectory_name)
+            plot_trajectory_speed_heatmap(
+                df=df,
+                speed_df=speed_df,
+                roi_cfg=roi_cfg,
+                out_path=session_dir / fig1_name,
+            )
+            plot_position_heatmap(df=df, roi_cfg=roi_cfg, out_path=session_dir / fig2_name)
+            plot_chamber_time_bars(df=df, out_path=session_dir / fig3_name, fixed_fps_hz=fixed_fps_hz)
             plot_speed(speed_df, out_path=session_dir / speed_name)
             plot_occupancy(df, out_path=session_dir / occupancy_name)
             logger.info("Plots written under %s", session_dir)

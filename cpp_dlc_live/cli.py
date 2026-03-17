@@ -65,6 +65,11 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Planned experiment duration in seconds (prefill for session prompt)",
     )
     p_run.add_argument("--no_session_prompt", action="store_true", help="Disable pre-run popup and use provided values")
+    p_run.add_argument(
+        "--no_auto_analyze",
+        action="store_true",
+        help="Skip automatic post-run analysis and plotting",
+    )
 
     p_an = sub.add_parser("analyze_session", help="Analyze one session directory")
     p_an.add_argument("--session_dir", required=True, help="Path to session directory")
@@ -130,6 +135,19 @@ def _cmd_run_realtime(args: argparse.Namespace) -> None:
     status = app.run()
     if status != 0:
         raise SystemExit(status)
+
+    analysis_cfg = config.get("analysis", {}) if isinstance(config.get("analysis", {}), dict) else {}
+    auto_analyze = bool(analysis_cfg.get("auto_after_run", True)) and (not bool(args.no_auto_analyze))
+    if auto_analyze:
+        logger.info("Auto analysis started for session: %s", session_dir)
+        summary_path = analyze_session(
+            session_dir=session_dir,
+            cm_per_px_override=None,
+            fixed_fps_hz_override=None,
+            output_plots_override=True,
+            logger=logger,
+        )
+        logger.info("Auto analysis finished: %s", summary_path)
 
 
 def _cmd_analyze_session(args: argparse.Namespace) -> None:

@@ -300,6 +300,7 @@ Note: always replace any machine-specific paths with your own absolute paths.
 - `laser_control.fallback_to_dryrun`
 
 ### `analysis`
+- `analysis.auto_after_run`: run `analyze_session` automatically right after successful realtime run
 - `analysis.cm_per_px`
 - `analysis.fixed_fps_hz`: optional fixed timebase for speed/occupancy metrics (ignores frame timestamp jitter)
 - `analysis.output_plots`
@@ -383,6 +384,7 @@ laser_control:
   fallback_to_dryrun: true
 
 analysis:
+  auto_after_run: true
   cm_per_px: null
   fixed_fps_hz: null
   output_plots: true
@@ -429,6 +431,7 @@ Common options:
 - `--group Control`
 - `--experiment_duration_s 600`
 - `--no_session_prompt` (skip popup and use provided values)
+- `--no_auto_analyze` (skip automatic post-run analysis/plots)
 
 Notes:
 - `preview_recording.enabled=true` can still record video even when `--no_preview` is used.
@@ -436,6 +439,7 @@ Notes:
 - On input video EOF, run exits normally.
 - Session folder name is expanded to include `timestamp + mouse_id + group + duration`.
 - Output files are prefixed with resolved session id.
+- By default, analysis is auto-run after each successful realtime session and writes Figure1–Figure5 plus summary.
 
 ## 2) `analyze_session`
 
@@ -528,7 +532,11 @@ Each session directory includes (depending on command and options):
 - `<session_id>_issue_events.jsonl`: structured issue/event stream
 - `<session_id>_incident_report_*.json`: runtime exception report snapshots
 - `<session_id>_summary.csv`: offline analysis summary
-- `<session_id>_trajectory.png`, `<session_id>_speed_over_time.png`, `<session_id>_occupancy_over_time.png` (if plot output enabled)
+- `<session_id>_figure1_trajectory_speed_heatmap.png`: trajectory with speed-coded color
+- `<session_id>_figure2_position_heatmap.png`: position occupancy heatmap
+- `<session_id>_figure3_chamber_dwell.png`: chamber1/chamber2 dwell time + percentage bars
+- `<session_id>_speed_over_time.png`: Figure 4
+- `<session_id>_occupancy_over_time.png`: Figure 5
 - `<session_id>_issue_summary.csv`, `<session_id>_issue_timeline.csv`, `<session_id>_incident_summary.csv` (from `analyze_issues`)
 
 ## Core columns in `cpp_realtime_log.csv`
