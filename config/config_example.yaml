@@ -7,6 +7,7 @@ camera:
   width: 1280
   height: 720
   fps_target: 30
+  enforce_fps: false
   flip: false
   rotate_deg: 0
 dlc:
@@ -77,6 +78,7 @@ laser_control:
   fallback_to_dryrun: true
 analysis:
   cm_per_px: null
+  fixed_fps_hz: null
   output_plots: true
 preview_recording:
   enabled: false

@@ -13,6 +13,11 @@ Chinese docs:
 - [Chinese Documentation Entry](docs/user_guide_zh.md)
 - [Operator Guide (中文)](docs/operator_guide_zh.md)
 - [Developer Guide (中文)](docs/developer_guide_zh.md)
+- [New Computer Setup Guide (中文)](docs/new_computer_setup_zh.md)
+
+Beginner setup docs:
+- [New Computer Setup Guide (EN)](docs/new_computer_setup_en.md)
+- [新电脑部署指南（中文）](docs/new_computer_setup_zh.md)
 
 For multi-device deployment details (pip/conda/docker/lock files), see:
 - [DEPLOYMENT_REQUIREMENTS.md](DEPLOYMENT_REQUIREMENTS.md)
@@ -31,6 +36,7 @@ For multi-device deployment details (pip/conda/docker/lock files), see:
 10. [Performance, Safety, and Failure Behavior](#performance-safety-and-failure-behavior)
 11. [Troubleshooting](#troubleshooting)
 12. [Development and Tests](#development-and-tests)
+13. [Beginner Setup Guides](#beginner-setup-guides)
 
 ## What This Project Solves
 
@@ -106,6 +112,10 @@ Key code entry points:
 - Issue analysis: `cpp_dlc_live/analysis/issues.py`
 
 ## Environment and Installation
+
+If you are deploying on a brand-new machine, follow these first:
+- [New Computer Setup Guide (EN)](docs/new_computer_setup_en.md)
+- [新电脑部署指南（中文）](docs/new_computer_setup_zh.md)
 
 ## Supported OS
 
@@ -188,6 +198,11 @@ python -c "import cv2, numpy, pandas, yaml; print('base ok')"
 python -c "import dlclive; print('dlclive ok')"   # if DLC is needed
 ```
 
+## Beginner Setup Guides
+
+- English: [New Computer Setup Guide (EN)](docs/new_computer_setup_en.md)
+- 中文: [新电脑部署指南（中文）](docs/new_computer_setup_zh.md)
+
 ## DeepLabCut-live Model Preparation
 
 This is the most common source of runtime confusion.
@@ -241,6 +256,7 @@ Note: always replace any machine-specific paths with your own absolute paths.
 - `camera.width`, `camera.height`, `camera.fps_target`
   - For camera devices, `fps_target` is requested via OpenCV capture settings.
   - For video-file sources, `fps_target` is also used to throttle playback to realtime speed.
+  - Set `camera.enforce_fps=true` to throttle realtime loop to `fps_target` even on camera input.
 - `camera.flip`, `camera.rotate_deg`
 
 ### `dlc`
@@ -268,6 +284,7 @@ Note: always replace any machine-specific paths with your own absolute paths.
 
 ### `analysis`
 - `analysis.cm_per_px`
+- `analysis.fixed_fps_hz`: optional fixed timebase for speed/occupancy metrics (ignores frame timestamp jitter)
 - `analysis.output_plots`
 
 ### `preview_recording`
@@ -299,6 +316,7 @@ camera:
   width: 1280
   height: 720
   fps_target: 30
+  enforce_fps: false
   flip: false
   rotate_deg: 0
 
@@ -334,6 +352,7 @@ laser_control:
 
 analysis:
   cm_per_px: null
+  fixed_fps_hz: null
   output_plots: true
 
 preview_recording:
@@ -380,6 +399,7 @@ cpp-dlc-live analyze_session --session_dir data/session_20260226_120000
 
 Options:
 - `--cm_per_px 0.05`
+- `--fixed_fps_hz 30`
 - `--no_plots`
 
 ## 3) `analyze_issues`

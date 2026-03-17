@@ -187,14 +187,16 @@ class RealtimeApp:
                 }
             )
             self.logger.info(
-                "Effective camera: source=%s size=%sx%s fps_capture=%.3f fps_target=%s source_is_file=%s file_throttle=%s",
+                "Effective camera: source=%s size=%sx%s fps_capture=%.3f fps_target=%s enforce_fps=%s source_is_file=%s file_throttle=%s throttle_reason=%s",
                 camera_info.get("source"),
                 camera_info.get("width"),
                 camera_info.get("height"),
                 float(camera_info.get("fps", 0.0) or 0.0),
                 camera_info.get("fps_target"),
+                camera_info.get("enforce_fps"),
                 camera_info.get("source_is_file"),
                 camera_info.get("file_realtime_throttle"),
+                camera_info.get("fps_throttle_reason"),
             )
 
             timestamps: Deque[float] = deque(maxlen=60)
@@ -623,6 +625,7 @@ class RealtimeApp:
             width=_optional_int(cam_cfg.get("width")),
             height=_optional_int(cam_cfg.get("height")),
             fps_target=_optional_float(cam_cfg.get("fps_target")),
+            enforce_fps=bool(cam_cfg.get("enforce_fps", False)),
             flip=bool(cam_cfg.get("flip", False)),
             rotate_deg=int(cam_cfg.get("rotate_deg", 0)),
         )

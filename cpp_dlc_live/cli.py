@@ -50,6 +50,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p_an = sub.add_parser("analyze_session", help="Analyze one session directory")
     p_an.add_argument("--session_dir", required=True, help="Path to session directory")
     p_an.add_argument("--cm_per_px", type=float, default=None, help="Override cm_per_px")
+    p_an.add_argument("--fixed_fps_hz", type=float, default=None, help="Use fixed FPS timebase for metrics")
     p_an.add_argument("--no_plots", action="store_true", help="Disable plot output")
 
     p_issues = sub.add_parser("analyze_issues", help="Analyze issue events and incident reports")
@@ -106,6 +107,7 @@ def _cmd_analyze_session(args: argparse.Namespace) -> None:
     summary_path = analyze_session(
         session_dir=session_dir,
         cm_per_px_override=args.cm_per_px,
+        fixed_fps_hz_override=args.fixed_fps_hz,
         output_plots_override=(False if args.no_plots else None),
         logger=logger,
     )

@@ -15,6 +15,7 @@ class CameraConfig:
     width: Optional[int] = None
     height: Optional[int] = None
     fps_target: Optional[float] = None
+    enforce_fps: bool = False
     flip: bool = False
     rotate_deg: int = 0
 
@@ -25,10 +26,12 @@ class CameraStream:
         self._source_is_file = isinstance(cfg.source, str) and Path(cfg.source).exists()
         self._throttle_period_s: Optional[float] = None
         self._next_frame_deadline: Optional[float] = None
+        self._throttle_reason: Optional[str] = None
 
-        if self._source_is_file and cfg.fps_target is not None and float(cfg.fps_target) > 0:
-            # Video files are often decoded as fast as possible; throttle to target FPS for realtime behavior.
+        if cfg.fps_target is not None and float(cfg.fps_target) > 0 and (self._source_is_file or bool(cfg.enforce_fps)):
+            # Throttle to target FPS when reading from file, or when explicitly enforced for camera streams.
             self._throttle_period_s = 1.0 / float(cfg.fps_target)
+            self._throttle_reason = "file_source" if self._source_is_file else "enforce_fps"
 
         self.cap = cv2.VideoCapture(cfg.source)
         if not self.cap.isOpened():
@@ -71,8 +74,10 @@ class CameraStream:
             "height": int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT)),
             "fps": float(self.cap.get(cv2.CAP_PROP_FPS) or 0.0),
             "fps_target": (float(self.cfg.fps_target) if self.cfg.fps_target is not None else None),
+            "enforce_fps": bool(self.cfg.enforce_fps),
             "source_is_file": self._source_is_file,
             "file_realtime_throttle": bool(self._throttle_period_s is not None),
+            "fps_throttle_reason": self._throttle_reason,
             "flip": bool(self.cfg.flip),
             "rotate_deg": int(self.cfg.rotate_deg),
         }

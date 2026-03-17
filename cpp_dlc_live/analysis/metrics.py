@@ -6,9 +6,15 @@ import numpy as np
 import pandas as pd
 
 
-def compute_dt_seconds(df: pd.DataFrame) -> np.ndarray:
+def compute_dt_seconds(df: pd.DataFrame, fixed_fps_hz: Optional[float] = None) -> np.ndarray:
     if "t_wall" not in df.columns or df.empty:
         return np.array([], dtype=float)
+
+    if fixed_fps_hz is not None:
+        fps = float(fixed_fps_hz)
+        if fps <= 0:
+            raise ValueError("fixed_fps_hz must be > 0")
+        return np.full(len(df), 1.0 / fps, dtype=float)
 
     t = pd.to_numeric(df["t_wall"], errors="coerce").to_numpy(dtype=float)
     n = len(t)
@@ -28,12 +34,12 @@ def compute_dt_seconds(df: pd.DataFrame) -> np.ndarray:
     return dt
 
 
-def compute_speed_series(df: pd.DataFrame) -> pd.DataFrame:
+def compute_speed_series(df: pd.DataFrame, fixed_fps_hz: Optional[float] = None) -> pd.DataFrame:
     n = len(df)
     if n == 0:
         return pd.DataFrame(columns=["t_wall", "speed_px_s"])
 
-    dt = compute_dt_seconds(df)
+    dt = compute_dt_seconds(df, fixed_fps_hz=fixed_fps_hz)
     x = pd.to_numeric(df.get("x"), errors="coerce").to_numpy(dtype=float)
     y = pd.to_numeric(df.get("y"), errors="coerce").to_numpy(dtype=float)
 
@@ -56,7 +62,11 @@ def compute_speed_series(df: pd.DataFrame) -> pd.DataFrame:
     )
 
 
-def compute_summary(df: pd.DataFrame, cm_per_px: Optional[float] = None) -> Dict[str, Any]:
+def compute_summary(
+    df: pd.DataFrame,
+    cm_per_px: Optional[float] = None,
+    fixed_fps_hz: Optional[float] = None,
+) -> Dict[str, Any]:
     if df.empty:
         return {
             "time_ch1_s": 0.0,
@@ -71,7 +81,7 @@ def compute_summary(df: pd.DataFrame, cm_per_px: Optional[float] = None) -> Dict
             "n_samples": 0,
         }
 
-    dt = compute_dt_seconds(df)
+    dt = compute_dt_seconds(df, fixed_fps_hz=fixed_fps_hz)
     chamber = df.get("chamber", pd.Series(["unknown"] * len(df))).astype(str).str.lower()
 
     time_ch1_s = float(dt[chamber == "chamber1"].sum())

@@ -14,6 +14,7 @@ from cpp_dlc_live.utils.io_utils import load_yaml
 def analyze_session(
     session_dir: Path,
     cm_per_px_override: Optional[float] = None,
+    fixed_fps_hz_override: Optional[float] = None,
     output_plots_override: Optional[bool] = None,
     logger: Optional[logging.Logger] = None,
 ) -> Path:
@@ -31,6 +32,11 @@ def analyze_session(
 
     analysis_cfg = config.get("analysis", {}) if isinstance(config, dict) else {}
     cm_per_px = cm_per_px_override if cm_per_px_override is not None else analysis_cfg.get("cm_per_px")
+    fixed_fps_hz = (
+        fixed_fps_hz_override
+        if fixed_fps_hz_override is not None
+        else analysis_cfg.get("fixed_fps_hz")
+    )
     output_plots = (
         output_plots_override
         if output_plots_override is not None
@@ -38,15 +44,17 @@ def analyze_session(
     )
 
     df = pd.read_csv(log_path)
-    summary = compute_summary(df, cm_per_px=cm_per_px)
+    summary = compute_summary(df, cm_per_px=cm_per_px, fixed_fps_hz=fixed_fps_hz)
 
     summary_path = session_dir / "summary.csv"
     pd.DataFrame([summary]).to_csv(summary_path, index=False)
     logger.info("Summary written: %s", summary_path)
+    if fixed_fps_hz is not None:
+        logger.info("Using fixed FPS for analysis: %.3f Hz", float(fixed_fps_hz))
 
     if output_plots:
         try:
-            speed_df = compute_speed_series(df)
+            speed_df = compute_speed_series(df, fixed_fps_hz=fixed_fps_hz)
             roi_cfg = config.get("roi", {}) if isinstance(config, dict) else {}
             plot_trajectory(df, roi_cfg=roi_cfg, out_path=session_dir / "trajectory.png")
             plot_speed(speed_df, out_path=session_dir / "speed_over_time.png")
