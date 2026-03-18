@@ -31,6 +31,7 @@ class RealtimeApp:
         duration_s: Optional[float] = None,
         camera_source_override: Optional[Union[int, str]] = None,
         preview: bool = True,
+        offline_fast: bool = False,
         file_prefix: Optional[str] = None,
         logger: Optional[logging.Logger] = None,
     ):
@@ -39,6 +40,7 @@ class RealtimeApp:
         self.duration_s = duration_s
         self.camera_source_override = camera_source_override
         self.preview = preview
+        self.offline_fast = bool(offline_fast)
         project_cfg = config.get("project", {}) if isinstance(config.get("project", {}), dict) else {}
         self.file_prefix = str(file_prefix or project_cfg.get("resolved_file_prefix") or "session")
         self.logger = logger or logging.getLogger("cpp_dlc_live")
@@ -179,6 +181,7 @@ class RealtimeApp:
             level="INFO",
             duration_s=self.duration_s,
             preview=self.preview,
+            offline_fast=self.offline_fast,
             fixed_fps=fixed_fps,
             preview_recording_requested=preview_record_requested,
             raw_recording_requested=raw_record_requested,
@@ -238,7 +241,7 @@ class RealtimeApp:
                 }
             )
             self.logger.info(
-                "Effective camera: source=%s size=%sx%s fps_capture=%.3f fps_target=%s enforce_fps=%s source_is_file=%s file_throttle=%s throttle_reason=%s fixed_fps=%s",
+                "Effective camera: source=%s size=%sx%s fps_capture=%.3f fps_target=%s enforce_fps=%s source_is_file=%s file_throttle=%s throttle_reason=%s fixed_fps=%s offline_fast=%s",
                 camera_info.get("source"),
                 camera_info.get("width"),
                 camera_info.get("height"),
@@ -249,6 +252,7 @@ class RealtimeApp:
                 camera_info.get("file_realtime_throttle"),
                 camera_info.get("fps_throttle_reason"),
                 fixed_fps,
+                self.offline_fast,
             )
 
             # Start experiment timer after all initialization (camera/runtime/controller/ROI/recorder)
@@ -738,6 +742,7 @@ class RealtimeApp:
                     "duration_s": max(0.0, end_wall - experiment_start_wall),
                     "session_total_s": max(0.0, end_wall - setup_start_wall),
                     "status_code": status_code,
+                    "offline_fast": self.offline_fast,
                     "runtime_stats": {
                         "frames_total": processed_frames,
                         "low_confidence_frames": low_confidence_frames,
@@ -787,9 +792,14 @@ class RealtimeApp:
         if self.camera_source_override is not None:
             cam_cfg["source"] = self.camera_source_override
         if fixed_fps is not None:
-            # Global fixed_fps enforces a single realtime frame cadence for camera and analysis.
+            # Global fixed_fps enforces a single frame/timebase. In offline_fast mode we keep
+            # fps_target for metadata/writer timebase, but disable realtime pacing throttle.
             cam_cfg["fps_target"] = fixed_fps
-            cam_cfg["enforce_fps"] = True
+            if not self.offline_fast:
+                cam_cfg["enforce_fps"] = True
+        if self.offline_fast:
+            cam_cfg["enforce_fps"] = False
+            cam_cfg["file_realtime_throttle"] = False
 
         source = cam_cfg.get("source", 0)
         if isinstance(source, str) and source.isdigit():
@@ -802,6 +812,7 @@ class RealtimeApp:
             height=_optional_int(cam_cfg.get("height")),
             fps_target=_optional_float(cam_cfg.get("fps_target")),
             enforce_fps=bool(cam_cfg.get("enforce_fps", False)),
+            file_realtime_throttle=bool(cam_cfg.get("file_realtime_throttle", True)),
             auto_exposure=_optional_bool(cam_cfg.get("auto_exposure")),
             exposure=_optional_float(cam_cfg.get("exposure")),
             gain=_optional_float(cam_cfg.get("gain")),

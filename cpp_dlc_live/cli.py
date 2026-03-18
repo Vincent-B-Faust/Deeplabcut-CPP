@@ -33,6 +33,9 @@ def main(argv: Optional[list[str]] = None) -> None:
     if args.command == "run_realtime":
         _cmd_run_realtime(args)
         return
+    if args.command == "run_offline":
+        _cmd_run_offline(args)
+        return
     if args.command == "analyze_session":
         _cmd_analyze_session(args)
         return
@@ -70,6 +73,28 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p_run.add_argument("--no_session_prompt", action="store_true", help="Disable pre-run popup and use provided values")
     p_run.add_argument(
+        "--no_auto_analyze",
+        action="store_true",
+        help="Skip automatic post-run analysis and plotting",
+    )
+
+    p_off = sub.add_parser("run_offline", help="Run fast offline replay from existing video")
+    p_off.add_argument("--config", required=True, help="Path to config YAML")
+    p_off.add_argument("--out_dir", default=None, help="Session output root override")
+    p_off.add_argument("--video", default=None, help="Offline input video path override")
+    p_off.add_argument("--camera_source", default=None, help="Alternative source override (same as --video)")
+    p_off.add_argument("--duration_s", type=float, default=None, help="Optional processing duration in seconds")
+    p_off.add_argument("--fixed_fps", type=float, default=None, help="Optional global fixed FPS override")
+    p_off.add_argument("--preview", action="store_true", help="Enable OpenCV preview window during offline replay")
+    p_off.add_argument("--mouse_id", default=None, help="Mouse ID for output naming metadata")
+    p_off.add_argument("--group", default=None, help="Group label for output naming metadata")
+    p_off.add_argument(
+        "--experiment_duration_s",
+        type=float,
+        default=None,
+        help="Session naming metadata duration (seconds); does not limit processing unless --duration_s is set",
+    )
+    p_off.add_argument(
         "--no_auto_analyze",
         action="store_true",
         help="Skip automatic post-run analysis and plotting",
@@ -180,27 +205,62 @@ def _cmd_run_realtime(args: argparse.Namespace) -> None:
     if status != 0:
         raise SystemExit(status)
 
-    analysis_cfg = config.get("analysis", {}) if isinstance(config.get("analysis", {}), dict) else {}
-    auto_analyze = bool(analysis_cfg.get("auto_after_run", True)) and (not bool(args.no_auto_analyze))
-    logger.info(
-        "Auto analysis config: auto_after_run=%s no_auto_analyze=%s output_plots=%s",
-        bool(analysis_cfg.get("auto_after_run", True)),
-        bool(args.no_auto_analyze),
-        bool(analysis_cfg.get("output_plots", True)),
+    _run_auto_analysis(config=config, no_auto_analyze=bool(args.no_auto_analyze), session_dir=session_dir, logger=logger)
+
+
+def _cmd_run_offline(args: argparse.Namespace) -> None:
+    config_path = Path(args.config)
+    config = load_yaml(config_path)
+
+    source_raw = args.video if args.video is not None else args.camera_source
+    source_override = _parse_source(source_raw) if source_raw is not None else None
+    if source_override is not None:
+        config.setdefault("camera", {})["source"] = source_override
+    if args.fixed_fps is not None:
+        config["fixed_fps"] = float(args.fixed_fps)
+
+    cam_cfg = config.setdefault("camera", {})
+    if isinstance(cam_cfg, dict):
+        # Offline replay should run as fast as possible for file inputs.
+        cam_cfg["file_realtime_throttle"] = False
+        cam_cfg["enforce_fps"] = False
+
+    laser_cfg = config.setdefault("laser_control", {})
+    if isinstance(laser_cfg, dict):
+        # Safety: offline replay must not touch NI hardware.
+        laser_cfg["mode"] = "dryrun"
+        laser_cfg["fallback_to_dryrun"] = True
+
+    session_info = _resolve_offline_session_info(config, args)
+    config["session_info"] = session_info
+
+    session_dir = prepare_session_dir(config, out_dir_override=args.out_dir)
+    file_prefix = str(config.setdefault("project", {}).get("resolved_file_prefix", "session"))
+    _apply_prefixed_output_names(config, file_prefix=file_prefix)
+
+    used_cfg_path = session_dir / ensure_prefixed_filename("config_used.yaml", file_prefix)
+    save_yaml(config, used_cfg_path)
+
+    logger = setup_logging(session_dir, file_prefix=file_prefix)
+    logger.info("Config copied to: %s", used_cfg_path)
+    logger.info("Config sha256: %s", file_sha256(used_cfg_path))
+    logger.info("Offline replay mode: source=%s preview=%s", config.get("camera", {}).get("source"), bool(args.preview))
+
+    app = RealtimeApp(
+        config=config,
+        session_dir=session_dir,
+        duration_s=(float(args.duration_s) if args.duration_s is not None else None),
+        camera_source_override=source_override,
+        preview=bool(args.preview),
+        offline_fast=True,
+        file_prefix=file_prefix,
+        logger=logger,
     )
-    if auto_analyze:
-        logger.info("Auto analysis started for session: %s", session_dir)
-        try:
-            summary_path = analyze_session(
-                session_dir=session_dir,
-                cm_per_px_override=None,
-                fixed_fps_hz_override=None,
-                output_plots_override=None,
-                logger=logger,
-            )
-            logger.info("Auto analysis finished: %s", summary_path)
-        except Exception:
-            logger.exception("Auto analysis failed for session: %s", session_dir)
+    status = app.run()
+    if status != 0:
+        raise SystemExit(status)
+
+    _run_auto_analysis(config=config, no_auto_analyze=bool(args.no_auto_analyze), session_dir=session_dir, logger=logger)
 
 
 def _cmd_analyze_session(args: argparse.Namespace) -> None:
@@ -218,6 +278,35 @@ def _cmd_analyze_session(args: argparse.Namespace) -> None:
         logger=logger,
     )
     print(summary_path)
+
+
+def _run_auto_analysis(
+    config: Dict[str, Any],
+    no_auto_analyze: bool,
+    session_dir: Path,
+    logger,
+) -> None:
+    analysis_cfg = config.get("analysis", {}) if isinstance(config.get("analysis", {}), dict) else {}
+    auto_analyze = bool(analysis_cfg.get("auto_after_run", True)) and (not bool(no_auto_analyze))
+    logger.info(
+        "Auto analysis config: auto_after_run=%s no_auto_analyze=%s output_plots=%s",
+        bool(analysis_cfg.get("auto_after_run", True)),
+        bool(no_auto_analyze),
+        bool(analysis_cfg.get("output_plots", True)),
+    )
+    if auto_analyze:
+        logger.info("Auto analysis started for session: %s", session_dir)
+        try:
+            summary_path = analyze_session(
+                session_dir=session_dir,
+                cm_per_px_override=None,
+                fixed_fps_hz_override=None,
+                output_plots_override=None,
+                logger=logger,
+            )
+            logger.info("Auto analysis finished: %s", summary_path)
+        except Exception:
+            logger.exception("Auto analysis failed for session: %s", session_dir)
 
 
 def _cmd_analyze_issues(args: argparse.Namespace) -> None:
@@ -439,6 +528,31 @@ def _resolve_session_info(config: Dict[str, Any], args: argparse.Namespace) -> D
         raise ValueError("mouse_id/group cannot be empty")
     info["experiment_duration_s"] = float(info.get("experiment_duration_s"))
     return info
+
+
+def _resolve_offline_session_info(config: Dict[str, Any], args: argparse.Namespace) -> Dict[str, Any]:
+    existing = config.get("session_info", {}) if isinstance(config.get("session_info", {}), dict) else {}
+
+    mouse_id = sanitize_name_component(args.mouse_id if args.mouse_id is not None else existing.get("mouse_id", "offline"))
+    group = sanitize_name_component(args.group if args.group is not None else existing.get("group", "replay"))
+
+    duration_seed = args.experiment_duration_s
+    if duration_seed is None:
+        duration_seed = args.duration_s
+    if duration_seed is None:
+        duration_seed = existing.get("experiment_duration_s")
+    if duration_seed is None:
+        duration_seed = 1.0
+
+    duration_s = float(duration_seed)
+    if duration_s <= 0:
+        duration_s = 1.0
+
+    return {
+        "mouse_id": (mouse_id or "offline"),
+        "group": (group or "replay"),
+        "experiment_duration_s": duration_s,
+    }
 
 
 def _apply_prefixed_output_names(config: Dict[str, Any], file_prefix: str) -> None:

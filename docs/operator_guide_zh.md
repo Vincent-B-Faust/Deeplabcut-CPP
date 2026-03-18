@@ -153,7 +153,34 @@ python -m cpp_dlc_live.cli run_realtime \
 3. 到 `duration_s` 自动结束。
 4. 视频文件到末尾自动结束。
 
-## 4.3 离线分析
+## 4.3 离线快速完整重跑（已有 raw video，不走实时节流）
+
+当你已经有原始视频，但仍希望按当前 config 重新跑完整流程并产出：
+1. `cpp_realtime_log.csv`
+2. `preview` 视频（若开启）
+3. `raw` 视频（若开启）
+4. `summary.csv` + Figure1~Figure5（若开启自动分析）
+
+可使用：
+
+```bash
+python -m cpp_dlc_live.cli run_offline \
+  --config config/xxx.yaml \
+  --video path/to/raw_video.mp4
+```
+
+可选：
+1. `--duration_s 600`：只处理前 600 秒；不传则处理到视频末尾。
+2. `--fixed_fps 20`：统一 FPS 时间基准。
+3. `--preview`：离线重跑时显示窗口（默认不显示以提升速度）。
+4. `--no_auto_analyze`：跳过自动分析。
+
+行为说明：
+1. 自动强制 `laser_control.mode=dryrun`（离线安全，不访问 NI 硬件）。
+2. 关闭文件源实时节流，按硬件上限尽快处理。
+3. ROI/debounce/激光状态逻辑与实时模式一致。
+
+## 4.4 离线分析
 
 ```bash
 python -m cpp_dlc_live.cli analyze_session \
@@ -177,7 +204,7 @@ python -m cpp_dlc_live.cli analyze_session \
   --no_plots
 ```
 
-## 4.4 问题日志分析（回溯专用）
+## 4.5 问题日志分析（回溯专用）
 
 ```bash
 python -m cpp_dlc_live.cli analyze_issues \
@@ -192,7 +219,7 @@ python -m cpp_dlc_live.cli analyze_issues \
 2. `issue_timeline.csv`：按时间展开的标准化事件流。
 3. `incident_summary.csv`：异常报告摘要（由 `incident_report_*.json` 汇总）。
 
-## 4.5 批量自动分析（目录下全部 session）
+## 4.6 批量自动分析（目录下全部 session）
 
 ```bash
 python -m cpp_dlc_live.cli analyze_batch \

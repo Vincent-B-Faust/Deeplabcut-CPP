@@ -14,6 +14,8 @@ camera:
   height: 720
   fps_target: 30
   enforce_fps: false
+  # For file source: true=simulate realtime pacing, false=process as fast as possible.
+  file_realtime_throttle: true
   # Set false to lock exposure; null keeps camera default behavior.
   auto_exposure: null
   # Manual exposure value (device/backend-specific units; often negative on Windows UVC).

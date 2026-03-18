@@ -274,6 +274,9 @@ Note: always replace any machine-specific paths with your own absolute paths.
   - For camera devices, `fps_target` is requested via OpenCV capture settings.
   - For video-file sources, `fps_target` is also used to throttle playback to realtime speed.
   - Set `camera.enforce_fps=true` to throttle realtime loop to `fps_target` even on camera input.
+- `camera.file_realtime_throttle`: `true` (default) | `false`
+  - `true`: when source is a video file, replay is throttled to realtime.
+  - `false`: process file as fast as possible (recommended for offline fast replay).
 - `camera.auto_exposure`: `true` (auto) | `false` (manual lock) | `null` (leave driver default)
 - `camera.exposure`: manual exposure value (`auto_exposure=false` recommended); unit/range is camera-driver specific
 - `camera.gain`: optional gain value; unit/range is camera-driver specific
@@ -510,7 +513,30 @@ Options:
 Output:
 - a report CSV under `root_dir` (default `batch_analysis_report.csv`) with per-session status and generated paths.
 
-## 5) `calibrate_roi`
+## 5) `run_offline` (fast full replay from raw video)
+
+Use this when you already have a raw video and want the full pipeline outputs (`cpp_realtime_log.csv`, preview/raw recording, summary, Figure1-5) without realtime pacing.
+
+```bash
+cpp-dlc-live run_offline \
+  --config config/config_example.yaml \
+  --video path/to/raw_video.mp4
+```
+
+Common options:
+- `--out_dir /path/to/output_root`
+- `--duration_s 600` (optional; omit to process until EOF)
+- `--fixed_fps 20`
+- `--preview` (show window; default is headless for speed)
+- `--mouse_id M001 --group Control --experiment_duration_s 600`
+- `--no_auto_analyze`
+
+Behavior:
+- Forces `laser_control.mode=dryrun` for safety.
+- Disables file realtime throttle and runs as fast as hardware allows.
+- Still uses your current config logic for DLC/ROI/debounce/laser state calculation and output file structure.
+
+## 6) `calibrate_roi`
 
 ```bash
 cpp-dlc-live calibrate_roi --config config/config_example.yaml --camera_source 0

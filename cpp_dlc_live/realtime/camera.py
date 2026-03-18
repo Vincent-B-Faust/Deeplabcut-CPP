@@ -16,6 +16,7 @@ class CameraConfig:
     height: Optional[int] = None
     fps_target: Optional[float] = None
     enforce_fps: bool = False
+    file_realtime_throttle: bool = True
     auto_exposure: Optional[bool] = None
     exposure: Optional[float] = None
     gain: Optional[float] = None
@@ -31,10 +32,15 @@ class CameraStream:
         self._next_frame_deadline: Optional[float] = None
         self._throttle_reason: Optional[str] = None
 
-        if cfg.fps_target is not None and float(cfg.fps_target) > 0 and (self._source_is_file or bool(cfg.enforce_fps)):
-            # Throttle to target FPS when reading from file, or when explicitly enforced for camera streams.
-            self._throttle_period_s = 1.0 / float(cfg.fps_target)
-            self._throttle_reason = "file_source" if self._source_is_file else "enforce_fps"
+        if cfg.fps_target is not None and float(cfg.fps_target) > 0:
+            # For file input, allow explicit fast offline replay by disabling realtime throttle.
+            if self._source_is_file and bool(cfg.file_realtime_throttle):
+                self._throttle_period_s = 1.0 / float(cfg.fps_target)
+                self._throttle_reason = "file_source"
+            elif (not self._source_is_file) and bool(cfg.enforce_fps):
+                # For live camera input, enforce_fps controls pacing.
+                self._throttle_period_s = 1.0 / float(cfg.fps_target)
+                self._throttle_reason = "enforce_fps"
 
         self.cap = cv2.VideoCapture(cfg.source)
         if not self.cap.isOpened():
@@ -86,6 +92,7 @@ class CameraStream:
             "exposure": float(self.cap.get(cv2.CAP_PROP_EXPOSURE) or 0.0),
             "gain": float(self.cap.get(cv2.CAP_PROP_GAIN) or 0.0),
             "source_is_file": self._source_is_file,
+            "file_realtime_throttle_requested": bool(self.cfg.file_realtime_throttle),
             "file_realtime_throttle": bool(self._throttle_period_s is not None),
             "fps_throttle_reason": self._throttle_reason,
             "flip": bool(self.cfg.flip),
