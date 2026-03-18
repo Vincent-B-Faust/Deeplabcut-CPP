@@ -164,6 +164,18 @@ python -m cpp_dlc_live.cli analyze_session \
 1. `--cm_per_px 0.05`。
 2. `--fixed_fps 30`：按固定 FPS 计算时长和速度。
 3. `--no_plots` 只要 summary。
+4. `--render_overlay_video`：离线生成带打标视频（无需重新跑 realtime）。
+5. `--overlay_video_source /path/to/video.mp4`：可覆盖默认视频来源。
+6. `--overlay_video_filename analysis_overlay.mp4`：输出文件名（相对路径会写入 session 目录）。
+
+示例（dryrun 后快速出打标视频）：
+
+```bash
+python -m cpp_dlc_live.cli analyze_session \
+  --session_dir data/<session_id> \
+  --render_overlay_video \
+  --no_plots
+```
 
 ## 4.4 问题日志分析（回溯专用）
 
@@ -192,9 +204,11 @@ python -m cpp_dlc_live.cli analyze_batch \
 1. `--cm_per_px 0.05`：统一覆盖比例尺。
 2. `--fixed_fps 30`：统一固定 FPS 时间基准。
 3. `--no_plots`：只导出 summary，不出图。
-4. `--include_issues`：同时执行 `analyze_issues`。
-5. `--report_name batch_analysis_report.csv`：批处理报告文件名。
-6. `--fail_fast`：遇到首个失败 session 立即停止。
+4. `--render_overlay_video`：为每个 session 离线生成打标视频。
+5. `--overlay_video_filename analysis_overlay.mp4`：批量模式下每个 session 的输出文件名。
+6. `--include_issues`：同时执行 `analyze_issues`。
+7. `--report_name batch_analysis_report.csv`：批处理报告文件名。
+8. `--fail_fast`：遇到首个失败 session 立即停止。
 
 ## 5. 标准操作流程（SOP）
 

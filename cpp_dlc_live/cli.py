@@ -81,6 +81,21 @@ def _build_parser() -> argparse.ArgumentParser:
     p_an.add_argument("--fixed_fps", type=float, default=None, help="Use global fixed FPS timebase for metrics")
     p_an.add_argument("--fixed_fps_hz", type=float, default=None, help="Use fixed FPS timebase for metrics")
     p_an.add_argument("--no_plots", action="store_true", help="Disable plot output")
+    p_an.add_argument(
+        "--render_overlay_video",
+        action="store_true",
+        help="Render offline overlay video from session log + source video",
+    )
+    p_an.add_argument(
+        "--overlay_video_source",
+        default=None,
+        help="Optional source video path override for offline overlay rendering",
+    )
+    p_an.add_argument(
+        "--overlay_video_filename",
+        default=None,
+        help="Optional output filename for offline overlay video (under session_dir if relative)",
+    )
 
     p_issues = sub.add_parser("analyze_issues", help="Analyze issue events and incident reports")
     p_issues.add_argument("--session_dir", required=True, help="Path to session directory")
@@ -97,6 +112,16 @@ def _build_parser() -> argparse.ArgumentParser:
     p_batch.add_argument("--fixed_fps", type=float, default=None, help="Use fixed FPS timebase for all sessions")
     p_batch.add_argument("--fixed_fps_hz", type=float, default=None, help="Legacy fixed FPS option")
     p_batch.add_argument("--no_plots", action="store_true", help="Disable plot generation for all sessions")
+    p_batch.add_argument(
+        "--render_overlay_video",
+        action="store_true",
+        help="Render offline overlay video for each session",
+    )
+    p_batch.add_argument(
+        "--overlay_video_filename",
+        default=None,
+        help="Optional output filename for offline overlay video in each session",
+    )
     p_batch.add_argument("--include_issues", action="store_true", help="Also run analyze_issues for each session")
     p_batch.add_argument("--fail_fast", action="store_true", help="Stop at first failed session")
     p_batch.add_argument(
@@ -157,6 +182,12 @@ def _cmd_run_realtime(args: argparse.Namespace) -> None:
 
     analysis_cfg = config.get("analysis", {}) if isinstance(config.get("analysis", {}), dict) else {}
     auto_analyze = bool(analysis_cfg.get("auto_after_run", True)) and (not bool(args.no_auto_analyze))
+    logger.info(
+        "Auto analysis config: auto_after_run=%s no_auto_analyze=%s output_plots=%s",
+        bool(analysis_cfg.get("auto_after_run", True)),
+        bool(args.no_auto_analyze),
+        bool(analysis_cfg.get("output_plots", True)),
+    )
     if auto_analyze:
         logger.info("Auto analysis started for session: %s", session_dir)
         try:
@@ -164,7 +195,7 @@ def _cmd_run_realtime(args: argparse.Namespace) -> None:
                 session_dir=session_dir,
                 cm_per_px_override=None,
                 fixed_fps_hz_override=None,
-                output_plots_override=True,
+                output_plots_override=None,
                 logger=logger,
             )
             logger.info("Auto analysis finished: %s", summary_path)
@@ -181,6 +212,9 @@ def _cmd_analyze_session(args: argparse.Namespace) -> None:
         # Keep backward compatibility with --fixed_fps_hz while preferring the new unified --fixed_fps.
         fixed_fps_hz_override=(args.fixed_fps if args.fixed_fps is not None else args.fixed_fps_hz),
         output_plots_override=(False if args.no_plots else None),
+        render_overlay_video=bool(args.render_overlay_video),
+        overlay_video_source_override=(Path(args.overlay_video_source) if args.overlay_video_source else None),
+        overlay_video_filename_override=args.overlay_video_filename,
         logger=logger,
     )
     print(summary_path)
@@ -229,6 +263,9 @@ def _cmd_analyze_batch(args: argparse.Namespace) -> None:
                 cm_per_px_override=args.cm_per_px,
                 fixed_fps_hz_override=(args.fixed_fps if args.fixed_fps is not None else args.fixed_fps_hz),
                 output_plots_override=(False if args.no_plots else None),
+                render_overlay_video=bool(getattr(args, "render_overlay_video", False)),
+                overlay_video_source_override=None,
+                overlay_video_filename_override=getattr(args, "overlay_video_filename", None),
                 logger=logger,
             )
             row["summary_path"] = str(summary_path)

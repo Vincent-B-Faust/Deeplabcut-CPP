@@ -71,12 +71,16 @@ class RealtimeApp:
         previous_laser_state = 0
 
         status_code = 0
-        start_wall = time.time()
-        start_monotonic = time.monotonic()
+        setup_start_wall = time.time()
+        setup_start_monotonic = time.monotonic()
+        # Will be reset right before entering the realtime loop so init time is excluded.
+        experiment_start_wall = setup_start_wall
+        experiment_start_monotonic = setup_start_monotonic
 
         metadata: Dict[str, Any] = {
             "start_time_utc": utc_now_iso(),
-            "start_wall": start_wall,
+            "start_wall": experiment_start_wall,
+            "setup_start_wall": setup_start_wall,
             "session_dir": str(self.session_dir),
             "config": self.config,
             "file_prefix": self.file_prefix,
@@ -247,6 +251,25 @@ class RealtimeApp:
                 fixed_fps,
             )
 
+            # Start experiment timer after all initialization (camera/runtime/controller/ROI/recorder)
+            # so requested duration_s matches actual experiment acquisition duration.
+            experiment_start_wall = time.time()
+            experiment_start_monotonic = time.monotonic()
+            metadata["start_time_utc"] = utc_now_iso()
+            metadata["start_wall"] = experiment_start_wall
+            metadata["setup_duration_s"] = max(0.0, experiment_start_wall - setup_start_wall)
+            self.logger.info(
+                "Experiment timer started (setup_duration_s=%.3f, duration_target_s=%s)",
+                metadata["setup_duration_s"],
+                self.duration_s,
+            )
+            issue_logger.log(
+                "experiment_timer_started",
+                level="INFO",
+                setup_duration_s=metadata["setup_duration_s"],
+                duration_target_s=self.duration_s,
+            )
+
             timestamps: Deque[float] = deque(maxlen=60)
             inference_ms_window: Deque[float] = deque(maxlen=120)
             last_heartbeat_monotonic = time.monotonic()
@@ -263,7 +286,7 @@ class RealtimeApp:
 
             while True:
                 if self.duration_s is not None:
-                    if (time.monotonic() - start_monotonic) >= self.duration_s:
+                    if (time.monotonic() - experiment_start_monotonic) >= self.duration_s:
                         self.logger.info("Duration reached: %.2f s", self.duration_s)
                         break
 
@@ -275,7 +298,7 @@ class RealtimeApp:
                     raise RuntimeError("Camera stream ended or frame read failed")
 
                 t_wall = time.time()
-                elapsed_s = max(0.0, t_wall - start_wall)
+                elapsed_s = max(0.0, t_wall - experiment_start_wall)
 
                 infer_t0 = time.perf_counter()
                 pose = runtime.infer(frame)
@@ -712,7 +735,8 @@ class RealtimeApp:
                     "dlc_model": (runtime.model_info() if runtime is not None else metadata.get("dlc_model")),
                     "end_time_utc": utc_now_iso(),
                     "end_wall": end_wall,
-                    "duration_s": max(0.0, end_wall - start_wall),
+                    "duration_s": max(0.0, end_wall - experiment_start_wall),
+                    "session_total_s": max(0.0, end_wall - setup_start_wall),
                     "status_code": status_code,
                     "runtime_stats": {
                         "frames_total": processed_frames,
@@ -749,7 +773,7 @@ class RealtimeApp:
                     "session_end",
                     level=("INFO" if status_code == 0 else "ERROR"),
                     status_code=status_code,
-                    duration_s=max(0.0, end_wall - start_wall),
+                    duration_s=max(0.0, end_wall - experiment_start_wall),
                     frames_total=processed_frames,
                     low_confidence_frames=low_confidence_frames,
                     warning_count=warning_count,

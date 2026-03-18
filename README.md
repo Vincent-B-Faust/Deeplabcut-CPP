@@ -463,6 +463,18 @@ Options:
 - `--fixed_fps 30`
 - `--fixed_fps_hz 30`
 - `--no_plots`
+- `--render_overlay_video` (render an offline annotated video from session log + source video)
+- `--overlay_video_source /path/to/raw_or_preview.mp4` (optional source override)
+- `--overlay_video_filename analysis_overlay.mp4` (optional output filename)
+
+Typical dryrun/offline workflow:
+
+```bash
+cpp-dlc-live analyze_session \
+  --session_dir data/session_20260226_120000 \
+  --render_overlay_video \
+  --no_plots
+```
 
 ## 3) `analyze_issues`
 
@@ -489,6 +501,8 @@ Options:
 - `--fixed_fps 30`
 - `--fixed_fps_hz 30`
 - `--no_plots`
+- `--render_overlay_video`
+- `--overlay_video_filename analysis_overlay.mp4`
 - `--include_issues`
 - `--fail_fast`
 - `--report_name batch_analysis_report.csv`
