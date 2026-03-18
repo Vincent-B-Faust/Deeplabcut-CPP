@@ -16,6 +16,7 @@ class PoseResult:
     y: float
     p: float
     bodypart: str
+    keypoints: Dict[str, tuple[float, float, float]]
 
 
 class RuntimeBase:
@@ -43,7 +44,13 @@ class MockDLCRuntime(RuntimeBase):
             x = float(w / 2)
             y = float(h / 2)
             p = 0.0
-        return PoseResult(x=x, y=y, p=p, bodypart=self.bodypart)
+        return PoseResult(
+            x=x,
+            y=y,
+            p=p,
+            bodypart=self.bodypart,
+            keypoints={self.bodypart: (x, y, p)},
+        )
 
     def model_info(self) -> Dict[str, Any]:
         return {
@@ -101,7 +108,19 @@ class DLCLiveRuntime(RuntimeBase):
             raise RuntimeError(f"Unexpected pose shape: {pose.shape}")
 
         x, y, p, resolved = _select_bodypart(pose, self._bodyparts, self.bodypart)
-        return PoseResult(x=float(x), y=float(y), p=float(p), bodypart=resolved)
+        keypoints = _extract_keypoints(pose=pose, bodyparts=self._bodyparts)
+        if resolved not in keypoints:
+            keypoints[resolved] = (float(x), float(y), float(p))
+        # Keep a "center" alias when center is synthesized from nose/tailbase midpoint.
+        if self.bodypart.strip().lower() == "center" and resolved == "nose_tailbase_midpoint":
+            keypoints.setdefault("center", (float(x), float(y), float(p)))
+        return PoseResult(
+            x=float(x),
+            y=float(y),
+            p=float(p),
+            bodypart=resolved,
+            keypoints=keypoints,
+        )
 
     def model_info(self) -> Dict[str, Any]:
         return {
@@ -197,6 +216,16 @@ def _extract_snapshot(model_cfg: Dict[str, Any]) -> Optional[str]:
         if isinstance(value, str) and value.strip():
             return value.strip()
     return None
+
+
+def _extract_keypoints(pose: np.ndarray, bodyparts: List[str]) -> Dict[str, tuple[float, float, float]]:
+    points: Dict[str, tuple[float, float, float]] = {}
+    n = int(pose.shape[0]) if pose.ndim >= 2 else 0
+    for idx in range(n):
+        row = pose[idx]
+        name = bodyparts[idx] if idx < len(bodyparts) else f"kp{idx}"
+        points[str(name)] = (float(row[0]), float(row[1]), float(row[2]))
+    return points
 
 
 def _select_bodypart(pose: np.ndarray, bodyparts: List[str], target: str) -> tuple[float, float, float, str]:

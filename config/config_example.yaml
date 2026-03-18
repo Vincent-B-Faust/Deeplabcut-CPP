@@ -26,7 +26,11 @@ dlc:
   model_path: C:\Users\admin\Desktop\RTPPTest-liu-2026-02-27\exported-models-pytorch\DLC_RTPPTest_resnet_50_iteration-0_shuffle-1\DLC_RTPPTest_resnet_50_iteration-0_shuffle-1_snapshot-best-10.pt
   backend: 'pytorch'
   device: auto
+  # Control bodypart for ROI/chamber classification and laser logic.
   bodypart: Mouse
+  # Optional preview overlay bodyparts. null/omit => only control bodypart.
+  # Example: ['head', 'tail', 'center'] or ['all'] for all model keypoints.
+  display_bodyparts: null
   p_thresh: 0.6
   smoothing:
     enabled: true

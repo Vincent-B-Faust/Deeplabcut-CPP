@@ -280,7 +280,10 @@ Note: always replace any machine-specific paths with your own absolute paths.
 - `dlc.model_path`: DLCLive model path (typically exported artifact)
 - `dlc.backend`: `auto` | `pytorch` | `tensorflow`
 - `dlc.device`: `auto` | `cpu` | `cuda` | `cuda:0` (passed to DLCLive when supported)
-- `dlc.bodypart`: tracked bodypart name (must exist in model, unless fallback logic is intentional)
+- `dlc.bodypart`: control bodypart used for ROI/chamber and laser logic
+- `dlc.display_bodyparts`: optional preview overlay bodyparts list, e.g. `["head","tail","center"]` or `["all"]`
+  - If omitted/null, preview shows only the control bodypart point.
+  - This setting does not change ROI/laser decisions.
 - `dlc.p_thresh`: confidence threshold
 - `dlc.smoothing.enabled`, `dlc.smoothing.window`
 
@@ -358,6 +361,7 @@ dlc:
   backend: pytorch
   device: cuda
   bodypart: Mouse
+  display_bodyparts: [head, tail, center]
   p_thresh: 0.2
   smoothing:
     enabled: false

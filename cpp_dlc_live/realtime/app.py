@@ -256,6 +256,8 @@ class RealtimeApp:
             last_valid_xy: Optional[Tuple[float, float]] = None
             last_non_neutral = "unknown"
             p_thresh = float(self.config.get("dlc", {}).get("p_thresh", 0.6))
+            display_bodyparts = _parse_display_bodyparts(self.config.get("dlc", {}).get("display_bodyparts"))
+            metadata["dlc_display_bodyparts"] = display_bodyparts
 
             self.logger.info("Realtime session started")
 
@@ -467,6 +469,10 @@ class RealtimeApp:
                         roi=roi,
                         x=x,
                         y=y,
+                        control_p=float(pose.p),
+                        control_bodypart=str(pose.bodypart),
+                        keypoints=pose.keypoints,
+                        display_bodyparts=display_bodyparts,
                         chamber=chamber,
                         laser_state=laser_state,
                         fps_est=fps_est,
@@ -848,6 +854,10 @@ class RealtimeApp:
         roi: ChamberROI,
         x: float,
         y: float,
+        control_p: float,
+        control_bodypart: str,
+        keypoints: Dict[str, Tuple[float, float, float]],
+        display_bodyparts: Optional[list[str]],
         chamber: str,
         laser_state: int,
         fps_est: float,
@@ -855,8 +865,26 @@ class RealtimeApp:
         elapsed_s: float,
     ) -> np.ndarray:
         vis = roi.draw(frame)
-        if math.isfinite(x) and math.isfinite(y):
-            cv2.circle(vis, (int(x), int(y)), 5, (255, 255, 255), -1)
+        for name, (px, py, pp), is_control in _resolve_preview_points(
+            keypoints=keypoints,
+            display_bodyparts=display_bodyparts,
+            control_bodypart=control_bodypart,
+            control_point=(x, y, control_p),
+        ):
+            if not (math.isfinite(px) and math.isfinite(py)):
+                continue
+            color = (255, 255, 255) if is_control else _bodypart_color(name)
+            radius = 5 if is_control else 4
+            cv2.circle(vis, (int(px), int(py)), radius, color, -1)
+            cv2.putText(
+                vis,
+                name,
+                (int(px) + 6, int(py) - 6),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.45,
+                color,
+                1,
+            )
 
         cv2.putText(vis, f"chamber: {chamber}", (10, 24), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
         cv2.putText(vis, f"laser: {laser_state}", (10, 52), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
@@ -950,3 +978,75 @@ def _optional_bool(v: Any) -> Optional[bool]:
     if text in {"0", "false", "no", "off"}:
         return False
     raise ValueError(f"Invalid boolean value: {v}")
+
+
+def _parse_display_bodyparts(value: Any) -> Optional[list[str]]:
+    if value is None:
+        return None
+
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        if text.lower() in {"all", "*"}:
+            return ["*"]
+        return [text]
+
+    if isinstance(value, (list, tuple)):
+        names = [str(v).strip() for v in value if str(v).strip()]
+        if not names:
+            return None
+        lowered = {n.lower() for n in names}
+        if "all" in lowered or "*" in lowered:
+            return ["*"]
+        return names
+
+    # Unsupported value type: ignore and fallback to default single control point.
+    return None
+
+
+def _resolve_preview_points(
+    keypoints: Dict[str, Tuple[float, float, float]],
+    display_bodyparts: Optional[list[str]],
+    control_bodypart: str,
+    control_point: Tuple[float, float, float],
+) -> list[Tuple[str, Tuple[float, float, float], bool]]:
+    if not keypoints:
+        return [(control_bodypart, control_point, True)]
+
+    if display_bodyparts is None:
+        return [(control_bodypart, control_point, True)]
+
+    if display_bodyparts == ["*"]:
+        return [(name, pt, name == control_bodypart) for name, pt in keypoints.items()]
+
+    by_lower = {name.lower(): name for name in keypoints.keys()}
+    selected: list[Tuple[str, Tuple[float, float, float], bool]] = []
+    seen: set[str] = set()
+    for requested in display_bodyparts:
+        actual = by_lower.get(requested.lower())
+        if actual is None or actual in seen:
+            continue
+        selected.append((actual, keypoints[actual], actual == control_bodypart))
+        seen.add(actual)
+
+    # If configured names don't match runtime keypoints, still show control point.
+    if not selected:
+        return [(control_bodypart, control_point, True)]
+    return selected
+
+
+def _bodypart_color(name: str) -> Tuple[int, int, int]:
+    palette = [
+        (0, 255, 0),
+        (0, 200, 255),
+        (255, 120, 0),
+        (255, 0, 180),
+        (180, 255, 0),
+        (255, 255, 0),
+        (0, 255, 255),
+        (255, 0, 0),
+    ]
+    # Stable color assignment across frames/sessions for the same label.
+    idx = abs(hash(name)) % len(palette)
+    return palette[idx]
