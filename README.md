@@ -525,16 +525,28 @@ cpp-dlc-live run_offline \
 
 Common options:
 - `--out_dir /path/to/output_root`
+- `--root_dir /path/to/sessions_or_videos --recursive` (batch replay)
 - `--duration_s 600` (optional; omit to process until EOF)
 - `--fixed_fps 20`
 - `--preview` (show window; default is headless for speed)
 - `--mouse_id M001 --group Control --experiment_duration_s 600`
 - `--no_auto_analyze`
+- `--fail_fast` (batch mode: stop on first failure)
+- `--batch_report_name offline_batch_report.csv`
 
 Behavior:
 - Forces `laser_control.mode=dryrun` for safety.
 - Disables file realtime throttle and runs as fast as hardware allows.
 - Still uses your current config logic for DLC/ROI/debounce/laser state calculation and output file structure.
+
+Batch example:
+
+```bash
+cpp-dlc-live run_offline \
+  --config config/config_example.yaml \
+  --root_dir D:/Data/LiuZY/Code/DeeplabcutCPP/output \
+  --recursive
+```
 
 ## 6) `calibrate_roi`
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
@@ -83,6 +84,14 @@ def _build_parser() -> argparse.ArgumentParser:
     p_off.add_argument("--out_dir", default=None, help="Session output root override")
     p_off.add_argument("--video", default=None, help="Offline input video path override")
     p_off.add_argument("--camera_source", default=None, help="Alternative source override (same as --video)")
+    p_off.add_argument("--root_dir", default=None, help="Batch replay root directory containing raw videos")
+    p_off.add_argument("--recursive", action="store_true", help="Recursively scan root_dir for videos")
+    p_off.add_argument("--fail_fast", action="store_true", help="Stop batch replay on first failed video")
+    p_off.add_argument(
+        "--batch_report_name",
+        default="offline_batch_report.csv",
+        help="Batch report CSV filename under root_dir",
+    )
     p_off.add_argument("--duration_s", type=float, default=None, help="Optional processing duration in seconds")
     p_off.add_argument("--fixed_fps", type=float, default=None, help="Optional global fixed FPS override")
     p_off.add_argument("--preview", action="store_true", help="Enable OpenCV preview window during offline replay")
@@ -209,13 +218,82 @@ def _cmd_run_realtime(args: argparse.Namespace) -> None:
 
 
 def _cmd_run_offline(args: argparse.Namespace) -> None:
-    config_path = Path(args.config)
-    config = load_yaml(config_path)
+    if getattr(args, "root_dir", None):
+        _cmd_run_offline_batch(args)
+        return
 
-    source_raw = args.video if args.video is not None else args.camera_source
+    source_raw = args.video if getattr(args, "video", None) is not None else getattr(args, "camera_source", None)
     source_override = _parse_source(source_raw) if source_raw is not None else None
+    status, _ = _run_offline_once(args=args, source_override=source_override, session_id_override=None)
+    if status != 0:
+        raise SystemExit(status)
+
+
+def _cmd_run_offline_batch(args: argparse.Namespace) -> None:
+    root_dir = Path(str(args.root_dir))
+    if not root_dir.exists():
+        raise FileNotFoundError(f"root_dir not found: {root_dir}")
+    if args.video or args.camera_source:
+        raise ValueError("--video/--camera_source cannot be used together with --root_dir")
+
+    video_paths = _discover_offline_videos(root_dir=root_dir, recursive=bool(args.recursive))
+    if not video_paths:
+        raise RuntimeError(f"No candidate offline videos found under: {root_dir}")
+
+    rows: List[Dict[str, Any]] = []
+    failed = 0
+    for idx, video_path in enumerate(video_paths, start=1):
+        session_id_override = f"offline_{idx:04d}_{sanitize_name_component(video_path.stem)[:40]}"
+        row = {
+            "index": idx,
+            "video_path": str(video_path),
+            "status": "ok",
+            "session_dir": "",
+            "error": "",
+        }
+        try:
+            status, session_dir = _run_offline_once(
+                args=args,
+                source_override=video_path,
+                session_id_override=session_id_override,
+            )
+            row["session_dir"] = str(session_dir)
+            if status != 0:
+                failed += 1
+                row["status"] = "failed"
+                row["error"] = f"status_code={status}"
+                if bool(args.fail_fast):
+                    rows.append(row)
+                    break
+        except Exception as exc:
+            failed += 1
+            row["status"] = "failed"
+            row["error"] = f"{type(exc).__name__}: {exc}"
+            if bool(args.fail_fast):
+                rows.append(row)
+                break
+        rows.append(row)
+
+    report_path = root_dir / str(args.batch_report_name)
+    pd.DataFrame(rows).to_csv(report_path, index=False)
+    print(report_path)
+    if failed > 0:
+        raise SystemExit(2)
+
+
+def _run_offline_once(
+    args: argparse.Namespace,
+    source_override: Optional[Union[int, str, Path]],
+    session_id_override: Optional[str],
+) -> tuple[int, Path]:
+    config_path = Path(args.config)
+    base_config = load_yaml(config_path)
+    config: Dict[str, Any] = copy.deepcopy(base_config)
+
+    source_value: Optional[Union[int, str]] = None
     if source_override is not None:
-        config.setdefault("camera", {})["source"] = source_override
+        source_value = _parse_source(source_override)
+        config.setdefault("camera", {})["source"] = source_value
     if args.fixed_fps is not None:
         config["fixed_fps"] = float(args.fixed_fps)
 
@@ -233,6 +311,8 @@ def _cmd_run_offline(args: argparse.Namespace) -> None:
 
     session_info = _resolve_offline_session_info(config, args)
     config["session_info"] = session_info
+    if session_id_override:
+        config.setdefault("project", {})["session_id"] = session_id_override
 
     session_dir = prepare_session_dir(config, out_dir_override=args.out_dir)
     file_prefix = str(config.setdefault("project", {}).get("resolved_file_prefix", "session"))
@@ -250,17 +330,21 @@ def _cmd_run_offline(args: argparse.Namespace) -> None:
         config=config,
         session_dir=session_dir,
         duration_s=(float(args.duration_s) if args.duration_s is not None else None),
-        camera_source_override=source_override,
+        camera_source_override=source_value,
         preview=bool(args.preview),
         offline_fast=True,
         file_prefix=file_prefix,
         logger=logger,
     )
     status = app.run()
-    if status != 0:
-        raise SystemExit(status)
-
-    _run_auto_analysis(config=config, no_auto_analyze=bool(args.no_auto_analyze), session_dir=session_dir, logger=logger)
+    if status == 0:
+        _run_auto_analysis(
+            config=config,
+            no_auto_analyze=bool(args.no_auto_analyze),
+            session_dir=session_dir,
+            logger=logger,
+        )
+    return status, session_dir
 
 
 def _cmd_analyze_session(args: argparse.Namespace) -> None:
@@ -472,6 +556,43 @@ def _is_session_dir(path: Path) -> bool:
         return True
     prefixed = list(path.glob("*_cpp_realtime_log.csv"))
     return len(prefixed) > 0
+
+
+def _discover_offline_videos(root_dir: Path, recursive: bool) -> List[Path]:
+    video_exts = {".mp4", ".avi", ".mov", ".mkv", ".m4v", ".mpg", ".mpeg"}
+    iterator = root_dir.rglob("*") if recursive else root_dir.iterdir()
+    grouped: Dict[Path, List[Path]] = {}
+
+    for p in iterator:
+        if not p.is_file():
+            continue
+        if p.suffix.lower() not in video_exts:
+            continue
+        grouped.setdefault(p.parent, []).append(p)
+
+    selected: List[Path] = []
+    for _, files in sorted(grouped.items(), key=lambda kv: str(kv[0])):
+        picked = _select_preferred_offline_video(files)
+        if picked is not None:
+            selected.append(picked)
+    return selected
+
+
+def _select_preferred_offline_video(files: List[Path]) -> Optional[Path]:
+    if not files:
+        return None
+
+    def score(p: Path) -> tuple[int, str]:
+        name = p.name.lower()
+        if "_raw_video" in name or name.startswith("raw_video"):
+            return (0, name)
+        if "raw" in name and "preview" not in name and "overlay" not in name:
+            return (1, name)
+        if "preview" in name or "overlay" in name:
+            return (3, name)
+        return (2, name)
+
+    return sorted(files, key=score)[0]
 
 
 def _discover_session_dirs(root_dir: Path, recursive: bool) -> List[Path]:
