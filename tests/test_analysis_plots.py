@@ -5,6 +5,7 @@ import json
 import pandas as pd
 
 from cpp_dlc_live.analysis.analyze import analyze_session
+from cpp_dlc_live.analysis.plots import _resolve_spatial_limits
 
 
 def test_analyze_session_generates_figure1_to_5_with_prefix(tmp_path) -> None:
@@ -41,3 +42,17 @@ def test_analyze_session_generates_figure1_to_5_with_prefix(tmp_path) -> None:
     ]
     for name in expected:
         assert (tmp_path / name).exists(), name
+
+
+def test_spatial_limits_prioritize_roi_over_frame_shape() -> None:
+    roi_cfg = {
+        "chamber1": [[100, 100], [300, 100], [300, 400], [100, 400]],
+        "chamber2": [[320, 100], [520, 100], [520, 400], [320, 400]],
+    }
+    x_min, x_max, y_min, y_max = _resolve_spatial_limits(
+        frame_shape=(1280, 720),
+        x_values=pd.Series([150.0, 500.0]).to_numpy(dtype=float),
+        y_values=pd.Series([120.0, 380.0]).to_numpy(dtype=float),
+        roi_cfg=roi_cfg,
+    )
+    assert (x_min, x_max, y_min, y_max) == (100.0, 520.0, 100.0, 400.0)

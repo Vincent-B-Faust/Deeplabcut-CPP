@@ -11,6 +11,12 @@ import numpy as np
 import pandas as pd
 from matplotlib.collections import LineCollection
 from matplotlib.colors import Normalize
+from matplotlib.patches import Polygon
+
+try:
+    from scipy.ndimage import gaussian_filter
+except Exception:  # pragma: no cover - optional runtime fallback
+    gaussian_filter = None  # type: ignore[assignment]
 
 from cpp_dlc_live.analysis.metrics import compute_dt_seconds
 
@@ -96,17 +102,42 @@ def plot_position_heatmap(
     yv = y[valid]
 
     fig, ax = plt.subplots(figsize=_spatial_figsize(frame_shape))
-    hist_range = None
-    if frame_shape is not None:
-        fw, fh = frame_shape
-        if fw > 0 and fh > 0:
-            hist_range = [[0.0, float(fw)], [0.0, float(fh)]]
+    x_min, x_max, y_min, y_max = _resolve_spatial_limits(
+        frame_shape=frame_shape,
+        x_values=x,
+        y_values=y,
+        roi_cfg=roi_cfg,
+    )
+    _draw_roi_background(ax=ax, roi_cfg=roi_cfg)
 
     if xv.size > 0:
-        bins = max(32, min(120, int(np.sqrt(xv.size))))
-        h = ax.hist2d(xv, yv, bins=bins, range=hist_range, cmap="hot")
-        cbar = fig.colorbar(h[3], ax=ax)
-        cbar.set_label("Counts")
+        span_x = max(1.0, x_max - x_min)
+        span_y = max(1.0, y_max - y_min)
+        bins_x = int(np.clip(span_x / 4.0, 48, 240))
+        bins_y = int(np.clip(span_y / 4.0, 48, 240))
+        hist, _, _ = np.histogram2d(
+            xv,
+            yv,
+            bins=(bins_x, bins_y),
+            range=[[x_min, x_max], [y_min, y_max]],
+        )
+        heat = hist.T
+        if gaussian_filter is not None:
+            heat = gaussian_filter(heat, sigma=2.0)
+
+        masked = np.ma.masked_less_equal(heat, 0.0)
+        cmap = plt.cm.jet.copy()
+        cmap.set_bad((0.0, 0.0, 0.0, 0.0))
+        im = ax.imshow(
+            masked,
+            extent=[x_min, x_max, y_min, y_max],
+            origin="lower",
+            cmap=cmap,
+            interpolation="bilinear",
+            alpha=0.95,
+        )
+        cbar = fig.colorbar(im, ax=ax, fraction=0.03, pad=0.01)
+        cbar.set_label("Occupancy density")
     else:
         ax.text(0.5, 0.5, "No valid position data", ha="center", va="center", transform=ax.transAxes)
 
@@ -264,18 +295,34 @@ def _apply_spatial_axes(
     y_values: np.ndarray,
     roi_cfg: Optional[Dict[str, Any]],
 ) -> None:
-    if frame_shape is not None:
-        width, height = frame_shape
-        if width > 0 and height > 0:
-            ax.set_xlim(0.0, float(width))
-            ax.set_ylim(float(height), 0.0)
-            ax.set_aspect("equal", adjustable="box")
-            return
-
-    x_min, x_max, y_min, y_max = _infer_spatial_limits(x_values=x_values, y_values=y_values, roi_cfg=roi_cfg)
+    x_min, x_max, y_min, y_max = _resolve_spatial_limits(
+        frame_shape=frame_shape,
+        x_values=x_values,
+        y_values=y_values,
+        roi_cfg=roi_cfg,
+    )
     ax.set_xlim(x_min, x_max)
     ax.set_ylim(y_max, y_min)
     ax.set_aspect("equal", adjustable="box")
+
+
+def _resolve_spatial_limits(
+    frame_shape: FrameShape,
+    x_values: np.ndarray,
+    y_values: np.ndarray,
+    roi_cfg: Optional[Dict[str, Any]],
+) -> Tuple[float, float, float, float]:
+    # Priority: ROI bounds (keeps original axis values and only shows experiment region).
+    roi_limits = _roi_limits(roi_cfg)
+    if roi_limits is not None:
+        return roi_limits
+
+    if frame_shape is not None:
+        width, height = frame_shape
+        if width > 0 and height > 0:
+            return (0.0, float(width), 0.0, float(height))
+
+    return _infer_spatial_limits(x_values=x_values, y_values=y_values, roi_cfg=roi_cfg)
 
 
 def _infer_spatial_limits(
@@ -316,3 +363,46 @@ def _infer_spatial_limits(
     x_margin = max(1.0, 0.02 * max(1.0, x_max - x_min))
     y_margin = max(1.0, 0.02 * max(1.0, y_max - y_min))
     return (x_min - x_margin, x_max + x_margin, y_min - y_margin, y_max + y_margin)
+
+
+def _roi_limits(roi_cfg: Optional[Dict[str, Any]]) -> Optional[Tuple[float, float, float, float]]:
+    if not roi_cfg:
+        return None
+
+    xs: list[float] = []
+    ys: list[float] = []
+    for key in ("chamber1", "chamber2", "neutral"):
+        pts = roi_cfg.get(key)
+        if not pts:
+            continue
+        arr = np.asarray(pts, dtype=float)
+        if arr.ndim != 2 or arr.shape[1] != 2:
+            continue
+        valid = np.isfinite(arr[:, 0]) & np.isfinite(arr[:, 1])
+        if np.any(valid):
+            xs.extend(arr[valid, 0].tolist())
+            ys.extend(arr[valid, 1].tolist())
+
+    if not xs or not ys:
+        return None
+    return (float(np.min(xs)), float(np.max(xs)), float(np.min(ys)), float(np.max(ys)))
+
+
+def _draw_roi_background(ax: Any, roi_cfg: Optional[Dict[str, Any]]) -> None:
+    if not roi_cfg:
+        return
+
+    # Use a light chamber background similar to common CPP occupancy maps.
+    _fill_roi(ax, roi_cfg.get("chamber1"), facecolor="#f4f6ff", alpha=0.85)
+    _fill_roi(ax, roi_cfg.get("chamber2"), facecolor="#f7e7ef", alpha=0.85)
+    _fill_roi(ax, roi_cfg.get("neutral"), facecolor="#efefef", alpha=0.70)
+
+
+def _fill_roi(ax: Any, roi_points: Any, facecolor: str, alpha: float) -> None:
+    if not roi_points:
+        return
+    arr = np.asarray(roi_points, dtype=float)
+    if arr.ndim != 2 or arr.shape[1] != 2:
+        return
+    patch = Polygon(arr, closed=True, facecolor=facecolor, edgecolor="none", alpha=alpha, zorder=0)
+    ax.add_patch(patch)
