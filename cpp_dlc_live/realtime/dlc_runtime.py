@@ -185,11 +185,7 @@ def build_runtime(dlc_cfg: Dict[str, Any], logger: Optional[logging.Logger] = No
 
 
 def _load_model_cfg(model_path: str) -> Dict[str, Any]:
-    candidates = [
-        Path(model_path) / "pose_cfg.yaml",
-        Path(model_path) / "config.yaml",
-        Path(model_path) / "dlc-models" / "pose_cfg.yaml",
-    ]
+    candidates = _candidate_model_cfg_paths(model_path)
     for p in candidates:
         if not p.exists():
             continue
@@ -203,10 +199,32 @@ def _load_model_cfg(model_path: str) -> Dict[str, Any]:
     return {}
 
 
+def _candidate_model_cfg_paths(model_path: str) -> List[Path]:
+    path = Path(model_path)
+    base_dir = path.parent if path.is_file() else path
+    return [
+        # DLC 3.0 PyTorch export usually stores bodypart names here (metadata.bodyparts).
+        base_dir / "pytorch_config.yaml",
+        # Legacy TensorFlow-style configs.
+        base_dir / "pose_cfg.yaml",
+        base_dir / "config.yaml",
+        base_dir / "dlc-models" / "pose_cfg.yaml",
+    ]
+
+
 def _extract_bodyparts(model_cfg: Dict[str, Any]) -> List[str]:
     names = model_cfg.get("all_joints_names") or model_cfg.get("bodyparts")
-    if isinstance(names, list) and names:
-        return [str(n) for n in names]
+    parsed = _normalize_bodypart_names(names)
+    if parsed:
+        return parsed
+
+    metadata = model_cfg.get("metadata", {})
+    if isinstance(metadata, dict):
+        names = metadata.get("all_joints_names") or metadata.get("bodyparts")
+        parsed = _normalize_bodypart_names(names)
+        if parsed:
+            return parsed
+
     return []
 
 
@@ -215,6 +233,12 @@ def _extract_snapshot(model_cfg: Dict[str, Any]) -> Optional[str]:
         value = model_cfg.get(key)
         if isinstance(value, str) and value.strip():
             return value.strip()
+    metadata = model_cfg.get("metadata", {})
+    if isinstance(metadata, dict):
+        for key in ("init_weights", "snapshot_prefix", "snapshot"):
+            value = metadata.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
     return None
 
 
@@ -226,6 +250,20 @@ def _extract_keypoints(pose: np.ndarray, bodyparts: List[str]) -> Dict[str, tupl
         name = bodyparts[idx] if idx < len(bodyparts) else f"kp{idx}"
         points[str(name)] = (float(row[0]), float(row[1]), float(row[2]))
     return points
+
+
+def _normalize_bodypart_names(raw_names: Any) -> List[str]:
+    if isinstance(raw_names, list) and raw_names:
+        names: List[str] = []
+        seen: set[str] = set()
+        for n in raw_names:
+            label = str(n).strip()
+            if not label or label in seen:
+                continue
+            names.append(label)
+            seen.add(label)
+        return names
+    return []
 
 
 def _select_bodypart(pose: np.ndarray, bodyparts: List[str], target: str) -> tuple[float, float, float, str]:
