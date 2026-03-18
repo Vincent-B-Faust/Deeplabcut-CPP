@@ -548,6 +548,11 @@ cpp-dlc-live run_offline \
   --recursive
 ```
 
+Batch source rule:
+- `--root_dir` scans `session_*` folders (or folders containing session metadata/log files).
+- In each session folder, only `*_raw_video.*`/`raw_video.*` files are selected.
+- `preview/overlay` videos are ignored for batch source selection.
+
 ## 6) `calibrate_roi`
 
 ```bash

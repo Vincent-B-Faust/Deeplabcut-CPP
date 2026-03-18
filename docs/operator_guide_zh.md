@@ -180,6 +180,20 @@ python -m cpp_dlc_live.cli run_offline \
 2. 关闭文件源实时节流，按硬件上限尽快处理。
 3. ROI/debounce/激光状态逻辑与实时模式一致。
 
+批量模式（按 `session` 文件夹自动找 raw video）：
+
+```bash
+python -m cpp_dlc_live.cli run_offline \
+  --config config/xxx.yaml \
+  --root_dir D:/Data/LiuZY/Code/DeeplabcutCPP/output \
+  --recursive
+```
+
+批量取源规则：
+1. 仅扫描 `session_*` 文件夹（或包含 session 元数据/日志的文件夹）。
+2. 每个 session 仅选择 `*_raw_video.*` 或 `raw_video.*`。
+3. `preview/overlay` 视频不会被选为输入源。
+
 ## 4.4 离线分析
 
 ```bash

@@ -559,40 +559,63 @@ def _is_session_dir(path: Path) -> bool:
 
 
 def _discover_offline_videos(root_dir: Path, recursive: bool) -> List[Path]:
-    video_exts = {".mp4", ".avi", ".mov", ".mkv", ".m4v", ".mpg", ".mpeg"}
     iterator = root_dir.rglob("*") if recursive else root_dir.iterdir()
-    grouped: Dict[Path, List[Path]] = {}
-
-    for p in iterator:
-        if not p.is_file():
-            continue
-        if p.suffix.lower() not in video_exts:
-            continue
-        grouped.setdefault(p.parent, []).append(p)
+    session_dirs = [p for p in iterator if p.is_dir() and _is_session_folder_for_offline(p)]
+    if _is_session_folder_for_offline(root_dir):
+        session_dirs.append(root_dir)
 
     selected: List[Path] = []
-    for _, files in sorted(grouped.items(), key=lambda kv: str(kv[0])):
-        picked = _select_preferred_offline_video(files)
+    seen_dirs: set[Path] = set()
+    for session_dir in sorted({p.resolve() for p in session_dirs}):
+        sdir = Path(session_dir)
+        if sdir in seen_dirs:
+            continue
+        seen_dirs.add(sdir)
+        picked = _find_session_raw_video(sdir)
         if picked is not None:
             selected.append(picked)
     return selected
 
 
-def _select_preferred_offline_video(files: List[Path]) -> Optional[Path]:
+def _is_session_folder_for_offline(path: Path) -> bool:
+    if not path.is_dir():
+        return False
+    if path.name.lower().startswith("session_"):
+        return True
+    if any(path.glob("*_metadata.json")):
+        return True
+    if any(path.glob("*_config_used.yaml")):
+        return True
+    if any(path.glob("*_cpp_realtime_log.csv")):
+        return True
+    return False
+
+
+def _find_session_raw_video(session_dir: Path) -> Optional[Path]:
+    video_exts = {".mp4", ".avi", ".mov", ".mkv", ".m4v", ".mpg", ".mpeg"}
+    files = [p for p in session_dir.iterdir() if p.is_file() and p.suffix.lower() in video_exts]
     if not files:
         return None
 
     def score(p: Path) -> tuple[int, str]:
         name = p.name.lower()
+        # Strict preference: any session raw video naming.
         if "_raw_video" in name or name.startswith("raw_video"):
             return (0, name)
         if "raw" in name and "preview" not in name and "overlay" not in name:
             return (1, name)
+        # Preview/overlay videos are not valid sources for this batch mode.
         if "preview" in name or "overlay" in name:
-            return (3, name)
-        return (2, name)
+            return (9, name)
+        return (5, name)
 
-    return sorted(files, key=score)[0]
+    ranked = sorted(files, key=score)
+    best = ranked[0]
+    best_score = score(best)[0]
+    # Require a raw-like filename in session folders to avoid accidental selection.
+    if best_score > 1:
+        return None
+    return best
 
 
 def _discover_session_dirs(root_dir: Path, recursive: bool) -> List[Path]:

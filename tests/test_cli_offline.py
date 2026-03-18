@@ -65,20 +65,24 @@ def test_cmd_run_offline_forces_fast_replay_and_dryrun(tmp_path, monkeypatch) ->
     assert used["laser_control"]["fallback_to_dryrun"] is True
 
 
-def test_discover_offline_videos_prefers_raw_video_per_folder(tmp_path) -> None:
+def test_discover_offline_videos_prefers_raw_video_in_session_folders(tmp_path) -> None:
     s1 = tmp_path / "session_a"
     s2 = tmp_path / "session_b"
+    not_session = tmp_path / "misc_videos"
     s1.mkdir()
     s2.mkdir()
+    not_session.mkdir()
     (s1 / "session_x_raw_video.mp4").write_bytes(b"")
     (s1 / "session_x_preview_overlay.mp4").write_bytes(b"")
-    (s2 / "my_video.avi").write_bytes(b"")
+    (s2 / "session_y_raw_video.avi").write_bytes(b"")
+    (not_session / "some_raw_video.mp4").write_bytes(b"")
 
     found = cli._discover_offline_videos(tmp_path, recursive=True)
     names = [p.name for p in found]
     assert "session_x_raw_video.mp4" in names
-    assert "my_video.avi" in names
+    assert "session_y_raw_video.avi" in names
     assert "session_x_preview_overlay.mp4" not in names
+    assert "some_raw_video.mp4" not in names
 
 
 def test_cmd_run_offline_batch_supports_root_dir(tmp_path, monkeypatch) -> None:
@@ -93,10 +97,10 @@ def test_cmd_run_offline_batch_supports_root_dir(tmp_path, monkeypatch) -> None:
         cfg,
     )
     root = tmp_path / "videos"
-    (root / "a").mkdir(parents=True)
-    (root / "b").mkdir(parents=True)
-    (root / "a" / "session_a_raw_video.mp4").write_bytes(b"dummy")
-    (root / "b" / "session_b_raw_video.mp4").write_bytes(b"dummy")
+    (root / "session_a").mkdir(parents=True)
+    (root / "session_b").mkdir(parents=True)
+    (root / "session_a" / "session_a_raw_video.mp4").write_bytes(b"dummy")
+    (root / "session_b" / "session_b_raw_video.mp4").write_bytes(b"dummy")
 
     calls: list[Path] = []
 
