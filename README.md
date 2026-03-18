@@ -14,10 +14,12 @@ Chinese docs:
 - [Operator Guide (中文)](docs/operator_guide_zh.md)
 - [Developer Guide (中文)](docs/developer_guide_zh.md)
 - [New Computer Setup Guide (中文)](docs/new_computer_setup_zh.md)
+- [DeepLabCut GUI 配置教程（中文）](docs/deeplabcut_gui_setup_zh.md)
 
 Beginner setup docs:
 - [New Computer Setup Guide (EN)](docs/new_computer_setup_en.md)
 - [新电脑部署指南（中文）](docs/new_computer_setup_zh.md)
+- [DeepLabCut GUI 配置教程（中文）](docs/deeplabcut_gui_setup_zh.md)
 
 For multi-device deployment details (pip/conda/docker/lock files), see:
 - [DEPLOYMENT_REQUIREMENTS.md](DEPLOYMENT_REQUIREMENTS.md)
@@ -202,6 +204,7 @@ python -c "import dlclive; print('dlclive ok')"   # if DLC is needed
 
 - English: [New Computer Setup Guide (EN)](docs/new_computer_setup_en.md)
 - 中文: [新电脑部署指南（中文）](docs/new_computer_setup_zh.md)
+- 中文: [DeepLabCut GUI 配置教程（Windows/Conda/RTX 5070 Ti）](docs/deeplabcut_gui_setup_zh.md)
 
 ## DeepLabCut-live Model Preparation
 
@@ -280,6 +283,9 @@ Note: always replace any machine-specific paths with your own absolute paths.
 - `dlc.model_path`: DLCLive model path (typically exported artifact)
 - `dlc.backend`: `auto` | `pytorch` | `tensorflow`
 - `dlc.device`: `auto` | `cpu` | `cuda` | `cuda:0` (passed to DLCLive when supported)
+- `dlc.strict_runtime`: `false` (default) | `true`
+  - `true`: fail fast if DLCLive cannot initialize (no fallback to mock runtime).
+  - recommended for real experiments to avoid silent incorrect tracking.
 - `dlc.bodypart`: control bodypart used for ROI/chamber and laser logic
 - `dlc.display_bodyparts`: optional preview overlay bodyparts list, e.g. `["head","tail","center"]` or `["all"]`
   - If omitted/null, preview shows only the control bodypart point.
@@ -360,6 +366,7 @@ dlc:
   model_path: C:/data/models/exported-models-pytorch/your_model.pt
   backend: pytorch
   device: cuda
+  strict_runtime: true
   bodypart: Mouse
   display_bodyparts: [head, tail, center]
   p_thresh: 0.2
@@ -636,6 +643,7 @@ Checks:
 2. Ensure `dlc.bodypart` exists in model bodypart names.
 3. Temporarily reduce `p_thresh` and disable smoothing for debugging.
 4. Recalibrate ROI using the exact runtime camera geometry.
+5. Set `dlc.strict_runtime: true` so initialization errors fail fast instead of falling back to mock.
 
 ## ROI looks shifted
 

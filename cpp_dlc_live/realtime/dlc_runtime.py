@@ -140,6 +140,7 @@ def build_runtime(dlc_cfg: Dict[str, Any], logger: Optional[logging.Logger] = No
     backend = _normalize_backend(dlc_cfg.get("backend", "auto"))
     device = _normalize_device(dlc_cfg.get("device", "auto"))
     model_path = str(dlc_cfg.get("model_path", "")).strip()
+    strict_runtime = _as_bool(dlc_cfg.get("strict_runtime"), default=False)
 
     if model_path and Path(model_path).exists():
         try:
@@ -175,12 +176,20 @@ def build_runtime(dlc_cfg: Dict[str, Any], logger: Optional[logging.Logger] = No
                     device,
                 )
             return runtime
-        except Exception:
+        except Exception as exc:
+            if strict_runtime:
+                if logger:
+                    logger.exception("DLCLive initialization failed and strict_runtime=true; aborting")
+                raise RuntimeError("DLCLive initialization failed (strict_runtime=true)") from exc
             if logger:
                 logger.exception("Failed to initialize DLCLive runtime, falling back to mock")
+    elif strict_runtime:
+        raise RuntimeError(f"DLCLive model_path is missing or does not exist: {model_path!r}")
 
     if logger:
-        logger.warning("Using mock DLC runtime (no valid model path or DLCLive unavailable)")
+        logger.warning(
+            "Using mock DLC runtime (no valid model path or DLCLive unavailable; set dlc.strict_runtime=true to fail fast)"
+        )
     return MockDLCRuntime(bodypart=bodypart)
 
 
@@ -327,6 +336,19 @@ def _normalize_device(value: Any) -> str:
         if suffix.isdigit():
             return f"cuda:{suffix}"
     return text
+
+
+def _as_bool(value: Any, default: bool = False) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "on"}:
+        return True
+    if text in {"0", "false", "no", "off"}:
+        return False
+    return default
 
 
 def _build_dlclive_instance(
