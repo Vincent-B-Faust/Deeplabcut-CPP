@@ -86,7 +86,12 @@ roi:
   debounce_frames: 8
 laser_control:
   enabled: true
+  # dryrun | continuous | pulse | gated | startstop
   mode: dryrun
+  # For mode=continuous (steady ON/OFF), output line:
+  continuous_line: cDAQ1Mod4/port0/line0
+  # For mode=pulse alias, choose implementation: gated | startstop
+  pulse_mode: gated
   freq_hz: 20.0
   duty_cycle: 0.05
   ctr_channel: cDAQ1Mod4/ctr0

@@ -29,7 +29,7 @@
 4. `roi.py`：ROI 数据结构、点在区域判定、标定。
 5. `debounce.py`：稳定状态切换。
 6. `controller_base.py`：激光控制接口。
-7. `controller_ni.py`：`DryRun/Gated/StartStop` 三实现。
+7. `controller_ni.py`：`DryRun/Continuous/Gated/StartStop` 实现与 `pulse` 模式别名路由。
 8. `recorder.py`：CSV 缓冲写入。
 9. `logging_utils.py`：控制台与文件日志。
 10. `issue_logger.py`：结构化事件日志（JSONL）。
@@ -106,8 +106,9 @@
 ## 4.2 现有实现
 
 1. `DryRunLaserController`：逻辑模拟，无硬件。
-2. `NILaserControllerGated`：持续 counter + DO 使能门控。
-3. `NILaserControllerStartStop`：按状态启停 counter，带最小开关时间。
+2. `NILaserControllerContinuous`：单 DO 线高/低电平控制（长亮）。
+3. `NILaserControllerGated`：持续 counter + DO 使能门控（脉冲）。
+4. `NILaserControllerStartStop`：按状态启停 counter，带最小开关时间（脉冲）。
 
 ## 4.3 新硬件接入建议
 

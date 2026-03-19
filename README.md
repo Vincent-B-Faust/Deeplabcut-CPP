@@ -4,7 +4,7 @@ End-to-end Python project for **real-time closed-loop 2-chamber CPP experiments*
 - video/camera acquisition
 - DeepLabCut-live inference
 - ROI chamber classification + debounce
-- NI cDAQ TTL control (`gated` / `startstop`) or `dryrun`
+- NI cDAQ TTL control (`continuous` / `pulse` / `gated` / `startstop`) or `dryrun`
 - offline session analysis and issue traceback
 
 `README.md` is the default **English** documentation for GitHub.
@@ -304,7 +304,13 @@ Note: always replace any machine-specific paths with your own absolute paths.
 
 ### `laser_control`
 - `laser_control.enabled`
-- `laser_control.mode`: `gated` | `startstop` | `dryrun`
+- `laser_control.mode`: `continuous` | `pulse` | `gated` | `startstop` | `dryrun`
+- `continuous`:
+  - steady level output (ON in `chamber1`, OFF otherwise)
+  - requires `laser_control.continuous_line` (or `enable_line` fallback)
+- `pulse`:
+  - user-facing pulse alias
+  - `laser_control.pulse_mode`: `gated` (default) | `startstop`
 - `laser_control.freq_hz`, `laser_control.duty_cycle`
 - `laser_control.ctr_channel`, `laser_control.pulse_term`, `laser_control.enable_line`
 - `laser_control.min_on_s`, `laser_control.min_off_s` (startstop)

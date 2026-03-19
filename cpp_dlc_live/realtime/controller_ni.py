@@ -55,6 +55,61 @@ class DryRunLaserController(LaserControllerBase):
         self.logger.info("DryRunLaserController stopped")
 
 
+class NILaserControllerContinuous(LaserControllerBase):
+    """Continuous level output using a single digital line (steady ON/OFF)."""
+
+    def __init__(
+        self,
+        line: str,
+        logger: Optional[logging.Logger] = None,
+    ):
+        super().__init__()
+        self.line = line
+        self.logger = logger or logging.getLogger("cpp_dlc_live")
+        self._do_task = None
+
+    def start(self) -> None:
+        nidaqmx, _ = _import_nidaqmx()
+        try:
+            self._do_task = nidaqmx.Task("cpp_continuous_do")
+            self._do_task.do_channels.add_do_chan(self.line)
+            self._do_task.start()
+            self._do_task.write(False)
+            self.current_state = False
+            self.logger.info("NILaserControllerContinuous started")
+        except Exception as exc:
+            self.stop()
+            raise LaserControllerError("Failed to start continuous NI laser controller") from exc
+
+    def set_state(self, on: bool) -> None:
+        if self._do_task is None:
+            raise LaserControllerError("Continuous NI controller is not started")
+        try:
+            self._do_task.write(bool(on))
+            self.current_state = bool(on)
+        except Exception as exc:
+            raise LaserControllerError("Failed to set continuous laser state") from exc
+
+    def stop(self) -> None:
+        try:
+            if self._do_task is not None:
+                try:
+                    self._do_task.write(False)
+                except Exception:
+                    pass
+                try:
+                    self._do_task.stop()
+                except Exception:
+                    pass
+                try:
+                    self._do_task.close()
+                except Exception:
+                    pass
+        finally:
+            self._do_task = None
+            self.current_state = False
+
+
 class NILaserControllerGated(LaserControllerBase):
     def __init__(
         self,
@@ -233,9 +288,29 @@ def create_laser_controller(laser_cfg: Dict[str, Any], logger: Optional[logging.
     logger = logger or logging.getLogger("cpp_dlc_live")
     enabled = bool(laser_cfg.get("enabled", True))
     mode = str(laser_cfg.get("mode", "dryrun")).lower().strip()
+    if mode in {"continues", "level"}:
+        mode = "continuous"
 
     if not enabled or mode == "dryrun":
         return DryRunLaserController(logger=logger)
+
+    if mode == "continuous":
+        # Preferred key for continuous-level output is continuous_line;
+        # enable_line is accepted for backward compatibility.
+        line = str(laser_cfg.get("continuous_line", "")).strip() or str(laser_cfg.get("enable_line", "")).strip()
+        if not line:
+            raise LaserControllerError("laser_control.continuous_line or laser_control.enable_line is required for continuous mode")
+        return NILaserControllerContinuous(
+            line=line,
+            logger=logger,
+        )
+
+    if mode == "pulse":
+        # Pulse mode is a user-facing alias. Internally choose legacy implementation.
+        pulse_mode = str(laser_cfg.get("pulse_mode", "gated")).lower().strip()
+        if pulse_mode not in {"gated", "startstop"}:
+            raise LaserControllerError(f"laser_control.pulse_mode must be gated|startstop, got: {pulse_mode}")
+        mode = pulse_mode
 
     freq_hz = float(laser_cfg.get("freq_hz", 20.0))
     duty_cycle = float(laser_cfg.get("duty_cycle", 0.05))

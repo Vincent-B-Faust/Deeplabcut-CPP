@@ -74,9 +74,11 @@ python -m cpp_dlc_live.cli --help
 ## 3.5 `laser_control`
 
 1. `mode=dryrun`：联调首选。
-2. `mode=gated`：硬件推荐模式。
-3. `mode=startstop`：兼容模式，需设置 `min_on_s/min_off_s`。
-4. `fallback_to_dryrun=true`：NI 异常时自动降级（建议保持开启）。
+2. `mode=continuous`：连续长亮模式（`chamber1` 开，其他区域关），需配置 `continuous_line`（或复用 `enable_line`）。
+3. `mode=pulse`：脉冲模式入口，`pulse_mode=gated|startstop`（默认 `gated`）。
+4. `mode=gated`：脉冲硬件推荐模式（持续 counter + 门控）。
+5. `mode=startstop`：脉冲兼容模式，需设置 `min_on_s/min_off_s`。
+6. `fallback_to_dryrun=true`：NI 异常时自动降级（建议保持开启）。
 
 ## 3.6 `runtime_logging`（回溯关键）
 
