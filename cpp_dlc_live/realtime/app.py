@@ -218,6 +218,7 @@ class RealtimeApp:
             laser_cfg = self.config.get("laser_control", {})
             controller = self._create_and_start_controller(laser_cfg)
             previous_laser_state = 1 if controller.current_state else 0
+            laser_mode_overlay = _format_laser_mode_overlay(laser_cfg if isinstance(laser_cfg, dict) else {})
 
             issue_logger.log(
                 "runtime_ready",
@@ -502,6 +503,7 @@ class RealtimeApp:
                         display_bodyparts=display_bodyparts,
                         chamber=chamber,
                         laser_state=laser_state,
+                        laser_mode_text=laser_mode_overlay,
                         fps_est=fps_est,
                         inference_ms=inference_ms,
                         elapsed_s=elapsed_s,
@@ -895,6 +897,7 @@ class RealtimeApp:
         display_bodyparts: Optional[list[str]],
         chamber: str,
         laser_state: int,
+        laser_mode_text: str,
         fps_est: float,
         inference_ms: float,
         elapsed_s: float,
@@ -923,12 +926,21 @@ class RealtimeApp:
 
         cv2.putText(vis, f"chamber: {chamber}", (10, 24), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
         cv2.putText(vis, f"laser: {laser_state}", (10, 52), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-        cv2.putText(vis, f"fps: {fps_est:.1f}", (10, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-        cv2.putText(vis, f"infer_ms: {inference_ms:.1f}", (10, 108), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+        cv2.putText(
+            vis,
+            f"laser_mode: {laser_mode_text}",
+            (10, 80),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.7,
+            (255, 255, 255),
+            2,
+        )
+        cv2.putText(vis, f"fps: {fps_est:.1f}", (10, 108), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+        cv2.putText(vis, f"infer_ms: {inference_ms:.1f}", (10, 136), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
         cv2.putText(
             vis,
             f"time: {RealtimeApp._format_elapsed_hhmmss(elapsed_s)}",
-            (10, 136),
+            (10, 164),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.7,
             (255, 255, 255),
@@ -1085,3 +1097,17 @@ def _bodypart_color(name: str) -> Tuple[int, int, int]:
     # Stable color assignment across frames/sessions for the same label.
     idx = abs(hash(name)) % len(palette)
     return palette[idx]
+
+
+def _format_laser_mode_overlay(laser_cfg: Dict[str, Any]) -> str:
+    mode_raw = str(laser_cfg.get("mode", "dryrun")).strip().lower()
+    if mode_raw in {"continuous", "continues", "level"}:
+        return "continuous"
+
+    if mode_raw in {"pulse", "gated", "startstop"}:
+        freq = _optional_float(laser_cfg.get("freq_hz"))
+        if freq is not None and freq > 0:
+            return f"pulse {freq:.1f}Hz"
+        return "pulse"
+
+    return mode_raw or "unknown"

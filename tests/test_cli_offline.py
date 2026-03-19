@@ -136,3 +136,56 @@ def test_cmd_run_offline_batch_supports_root_dir(tmp_path, monkeypatch) -> None:
     assert report.exists()
     text = report.read_text(encoding="utf-8")
     assert "status" in text and "session_dir" in text
+
+
+def test_resolve_session_info_no_prompt_includes_laser_mode_and_freq() -> None:
+    config = {
+        "laser_control": {
+            "mode": "startstop",
+            "freq_hz": 25.0,
+        }
+    }
+    args = Namespace(
+        mouse_id="M001",
+        group="test",
+        experiment_duration_s=120.0,
+        duration_s=None,
+        no_session_prompt=True,
+    )
+
+    info = cli._resolve_session_info(config, args)
+    assert info["laser_mode"] == "pulse"
+    assert float(info["pulse_freq_hz"]) == 25.0
+
+
+def test_apply_session_laser_settings_preserves_legacy_pulse_mode() -> None:
+    config = {
+        "laser_control": {
+            "mode": "startstop",
+            "freq_hz": 20.0,
+        }
+    }
+    session_info = {
+        "laser_mode": "pulse",
+        "pulse_freq_hz": 40.0,
+    }
+
+    cli._apply_session_laser_settings(config, session_info)
+    assert config["laser_control"]["mode"] == "startstop"
+    assert float(config["laser_control"]["freq_hz"]) == 40.0
+
+
+def test_apply_session_laser_settings_switches_to_continuous() -> None:
+    config = {
+        "laser_control": {
+            "mode": "startstop",
+            "freq_hz": 20.0,
+        }
+    }
+    session_info = {
+        "laser_mode": "continuous",
+        "pulse_freq_hz": None,
+    }
+
+    cli._apply_session_laser_settings(config, session_info)
+    assert config["laser_control"]["mode"] == "continuous"

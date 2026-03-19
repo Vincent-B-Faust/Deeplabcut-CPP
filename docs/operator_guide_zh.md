@@ -144,10 +144,13 @@ python -m cpp_dlc_live.cli run_realtime \
 4. `--no_preview`：无显示环境时关闭窗口。
 5. 即使 `--no_preview`，只要 `preview_recording.enabled=true` 仍会保存视频。
 6. 同时设置 `preview_recording.enabled=true` 和 `raw_recording.enabled=true` 可同时保存“带标注视频 + 原始视频”。
-7. 运行前会弹窗输入：小鼠编号、实验组别、实验时长（带历史下拉）。
+7. 运行前会弹窗输入：小鼠编号、实验组别、实验时长、激光模式（continuous/pulse）以及 pulse 频率（带历史下拉）。
 8. 可用 `--mouse_id`、`--group`、`--experiment_duration_s` 预填。
 9. 无弹窗模式可加 `--no_session_prompt`（需同时提供以上字段）。
 10. `--no_auto_analyze`：关闭实验结束后的自动分析与出图。
+
+预览叠加信息：
+1. 预览窗口会同时显示 `laser` 当前状态（0/1）和 `laser_mode`（`continuous` 或 `pulse xx.xHz`）。
 
 结束方式：
 1. 预览窗口按 `q` 或 `Esc`。

@@ -276,6 +276,7 @@ def render_session_overlay_video(
             except Exception:
                 logger.exception("Failed to build ROI for overlay video; proceeding without ROI draw")
                 roi = None
+            laser_mode_text = _resolve_laser_mode_overlay_text(config=config, metadata=metadata)
 
             t0 = _first_time_value(df)
 
@@ -303,11 +304,12 @@ def render_session_overlay_video(
                     cv2.circle(vis, (int(x), int(y)), 5, (255, 255, 255), -1)
                 cv2.putText(vis, f"chamber: {chamber}", (10, 24), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
                 cv2.putText(vis, f"laser: {laser}", (10, 52), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-                cv2.putText(vis, f"p: {p:.3f}", (10, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+                cv2.putText(vis, f"laser_mode: {laser_mode_text}", (10, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+                cv2.putText(vis, f"p: {p:.3f}", (10, 108), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
                 cv2.putText(
                     vis,
                     f"time: {_format_elapsed_hhmmss(elapsed_s)}",
-                    (10, 108),
+                    (10, 136),
                     cv2.FONT_HERSHEY_SIMPLEX,
                     0.7,
                     (255, 255, 255),
@@ -453,6 +455,26 @@ def _safe_float(value: object, default: float = float("nan")) -> float:
         return float(value)
     except Exception:
         return default
+
+
+def _resolve_laser_mode_overlay_text(config: dict, metadata: dict) -> str:
+    laser_cfg = config.get("laser_control", {}) if isinstance(config, dict) else {}
+    if not isinstance(laser_cfg, dict):
+        laser_cfg = {}
+    if not laser_cfg and isinstance(metadata, dict):
+        daq = metadata.get("daq", {})
+        if isinstance(daq, dict):
+            laser_cfg = daq
+
+    mode_raw = str(laser_cfg.get("mode", "dryrun")).strip().lower()
+    if mode_raw in {"continuous", "continues", "level"}:
+        return "continuous"
+    if mode_raw in {"pulse", "gated", "startstop"}:
+        freq = _coerce_optional_positive_float(laser_cfg.get("freq_hz"), field_name="laser_control.freq_hz")
+        if freq is None:
+            return "pulse"
+        return f"pulse {float(freq):.1f}Hz"
+    return mode_raw or "unknown"
 
 
 def _first_time_value(df: pd.DataFrame) -> Optional[float]:

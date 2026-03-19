@@ -1,4 +1,4 @@
-from cpp_dlc_live.realtime.app import _parse_display_bodyparts, _resolve_preview_points
+from cpp_dlc_live.realtime.app import _format_laser_mode_overlay, _parse_display_bodyparts, _resolve_preview_points
 
 
 def test_parse_display_bodyparts_normalization() -> None:
@@ -44,3 +44,9 @@ def test_resolve_preview_points_fallback_when_no_name_matches() -> None:
         control_point=(5.0, 6.0, 0.7),
     )
     assert resolved == [("center", (5.0, 6.0, 0.7), True)]
+
+
+def test_format_laser_mode_overlay() -> None:
+    assert _format_laser_mode_overlay({"mode": "continuous"}) == "continuous"
+    assert _format_laser_mode_overlay({"mode": "pulse", "freq_hz": 20}) == "pulse 20.0Hz"
+    assert _format_laser_mode_overlay({"mode": "startstop", "freq_hz": 10}) == "pulse 10.0Hz"

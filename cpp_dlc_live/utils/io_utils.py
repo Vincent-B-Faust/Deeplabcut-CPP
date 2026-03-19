@@ -79,8 +79,12 @@ def build_session_suffix(session_info: Dict[str, Any]) -> str:
     mouse_id = sanitize_name_component(session_info.get("mouse_id"))
     group = sanitize_name_component(session_info.get("group"))
     duration = _format_duration_for_name(session_info.get("experiment_duration_s"))
+    laser_mode = _format_laser_mode_for_name(
+        session_info.get("laser_mode"),
+        session_info.get("pulse_freq_hz"),
+    )
 
-    parts = [p for p in [mouse_id, group, duration] if p]
+    parts = [p for p in [mouse_id, group, duration, laser_mode] if p]
     return "_".join(parts)
 
 
@@ -106,6 +110,33 @@ def _format_duration_for_name(value: Any) -> str:
         return f"{int(v)}s"
     text = f"{v:.3f}".rstrip("0").rstrip(".").replace(".", "p")
     return f"{text}s"
+
+
+def _format_laser_mode_for_name(mode: Any, pulse_freq_hz: Any) -> str:
+    if mode is None:
+        return ""
+    raw = str(mode).strip().lower()
+    if not raw:
+        return ""
+    if raw in {"none", "null"}:
+        return ""
+
+    if raw in {"continuous", "continues", "level"}:
+        return "continuous"
+
+    if raw in {"pulse", "gated", "startstop"}:
+        try:
+            freq = float(pulse_freq_hz)
+        except Exception:
+            return "pulse"
+        if freq <= 0:
+            return "pulse"
+        if float(freq).is_integer():
+            return f"pulse{int(freq)}Hz"
+        text = f"{freq:.3f}".rstrip("0").rstrip(".").replace(".", "p")
+        return f"pulse{text}Hz"
+
+    return sanitize_name_component(raw)
 
 
 def detect_session_file_prefix(session_dir: PathLike) -> Optional[str]:

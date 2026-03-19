@@ -68,8 +68,10 @@ After runtime:
   - confidence threshold + hold-last-valid logic
   - OpenCV overlay preview (including runtime timer `HH:MM:SS.mmm`)
 - Laser control modes:
-  - `gated`: continuous counter pulse + digital enable line
-  - `startstop`: on-demand counter start/stop with min on/off dwell
+  - `continuous`: level output (ON while mouse is in chamber1, OFF otherwise)
+  - `pulse`: pulse output in chamber1 (frequency configurable)
+    - `pulse_mode=gated`: continuous counter pulse + digital enable line
+    - `pulse_mode=startstop`: on-demand counter start/stop with min on/off dwell
   - `dryrun`: no hardware output, full logic path enabled
 - Safety behavior:
   - default output state is OFF
@@ -271,6 +273,8 @@ Note: always replace any machine-specific paths with your own absolute paths.
 - `session_info.mouse_id`: mouse identifier
 - `session_info.group`: group label
 - `session_info.experiment_duration_s`: planned duration in seconds
+- `session_info.laser_mode`: `continuous` or `pulse` (selected in pre-run popup)
+- `session_info.pulse_freq_hz`: pulse frequency when `laser_mode=pulse`
 - `run_realtime` opens a popup before start (with history dropdowns) to confirm/edit these values.
 
 ### `camera`
@@ -462,9 +466,10 @@ Notes:
 - `preview_recording.enabled=true` can still record video even when `--no_preview` is used.
 - Set both `preview_recording.enabled=true` and `raw_recording.enabled=true` to save both overlay and raw videos simultaneously.
 - On input video EOF, run exits normally.
-- Session folder name is expanded to include `timestamp + mouse_id + group + duration`.
+- Session folder name is expanded to include `timestamp + mouse_id + group + duration + laser_mode` (pulse also includes frequency in suffix).
 - Output files are prefixed with resolved session id.
 - By default, analysis is auto-run after each successful realtime session and writes Figure1–Figure5 plus summary.
+- Preview overlay now shows both `laser` state (`0/1`) and `laser_mode` (`continuous` or `pulse xx.xHz`).
 
 ## 2) `analyze_session`
 

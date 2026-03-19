@@ -189,6 +189,7 @@ def _cmd_run_realtime(args: argparse.Namespace) -> None:
     session_info = _resolve_session_info(config, args)
     config["session_info"] = session_info
     args.duration_s = float(session_info["experiment_duration_s"])
+    _apply_session_laser_settings(config, session_info)
 
     session_dir = prepare_session_dir(config, out_dir_override=args.out_dir)
     file_prefix = str(config.setdefault("project", {}).get("resolved_file_prefix", "session"))
@@ -548,6 +549,15 @@ def _parse_source(raw: Union[str, int, None]) -> Union[str, int]:
     return text
 
 
+def _optional_float(value: Any) -> Optional[float]:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    return float(text)
+
+
 def _is_session_dir(path: Path) -> bool:
     if not path.is_dir():
         return False
@@ -635,9 +645,13 @@ def _discover_session_dirs(root_dir: Path, recursive: bool) -> List[Path]:
 
 def _resolve_session_info(config: Dict[str, Any], args: argparse.Namespace) -> Dict[str, Any]:
     existing = config.get("session_info", {}) if isinstance(config.get("session_info", {}), dict) else {}
+    laser_cfg = config.get("laser_control", {}) if isinstance(config.get("laser_control", {}), dict) else {}
 
     default_mouse = str(args.mouse_id if args.mouse_id is not None else existing.get("mouse_id", "")).strip()
     default_group = str(args.group if args.group is not None else existing.get("group", "")).strip()
+    default_laser_mode = str(existing.get("laser_mode", "")).strip() or str(laser_cfg.get("mode", "pulse")).strip()
+    default_pulse_freq = existing.get("pulse_freq_hz", laser_cfg.get("freq_hz"))
+    pulse_freq_seed = _optional_float(default_pulse_freq)
 
     duration_seed = args.experiment_duration_s
     if duration_seed is None:
@@ -655,22 +669,37 @@ def _resolve_session_info(config: Dict[str, Any], args: argparse.Namespace) -> D
         duration_s = float(duration_seed)
         if duration_s <= 0:
             raise ValueError("experiment_duration_s must be > 0")
+        laser_mode = _normalize_user_laser_mode(default_laser_mode)
+        pulse_freq_hz = (pulse_freq_seed if pulse_freq_seed is not None else 20.0) if laser_mode == "pulse" else None
+        if laser_mode == "pulse" and (pulse_freq_hz is None or pulse_freq_hz <= 0):
+            raise ValueError("laser pulse_freq_hz must be > 0 when laser_mode=pulse")
         return {
             "mouse_id": mouse_id,
             "group": group,
             "experiment_duration_s": duration_s,
+            "laser_mode": laser_mode,
+            "pulse_freq_hz": pulse_freq_hz,
         }
 
     info = collect_session_info(
         default_mouse_id=default_mouse,
         default_group=default_group,
         default_duration_s=(float(duration_seed) if duration_seed is not None else None),
+        default_laser_mode=_normalize_user_laser_mode(default_laser_mode),
+        default_pulse_freq_hz=pulse_freq_seed,
     )
     info["mouse_id"] = sanitize_name_component(info.get("mouse_id", ""))
     info["group"] = sanitize_name_component(info.get("group", ""))
     if not info["mouse_id"] or not info["group"]:
         raise ValueError("mouse_id/group cannot be empty")
     info["experiment_duration_s"] = float(info.get("experiment_duration_s"))
+    info["laser_mode"] = _normalize_user_laser_mode(info.get("laser_mode", default_laser_mode))
+    info["pulse_freq_hz"] = _optional_float(info.get("pulse_freq_hz"))
+    if info["laser_mode"] == "pulse":
+        if info["pulse_freq_hz"] is None or info["pulse_freq_hz"] <= 0:
+            raise ValueError("laser pulse_freq_hz must be > 0 when laser_mode=pulse")
+    else:
+        info["pulse_freq_hz"] = None
     return info
 
 
@@ -697,6 +726,43 @@ def _resolve_offline_session_info(config: Dict[str, Any], args: argparse.Namespa
         "group": (group or "replay"),
         "experiment_duration_s": duration_s,
     }
+
+
+def _normalize_user_laser_mode(mode: Any) -> str:
+    text = str(mode).strip().lower()
+    if text in {"", "dryrun", "real"}:
+        return "pulse"
+    if text in {"continuous", "continues", "level"}:
+        return "continuous"
+    if text in {"pulse", "gated", "startstop"}:
+        return "pulse"
+    raise ValueError(f"laser mode must be continuous|pulse, got: {mode}")
+
+
+def _apply_session_laser_settings(config: Dict[str, Any], session_info: Dict[str, Any]) -> None:
+    laser_mode = str(session_info.get("laser_mode", "")).strip()
+    if not laser_mode:
+        return
+
+    laser_cfg = config.setdefault("laser_control", {})
+    if not isinstance(laser_cfg, dict):
+        return
+
+    normalized = _normalize_user_laser_mode(laser_mode)
+    current_mode_raw = str(laser_cfg.get("mode", "dryrun")).strip().lower()
+
+    if normalized == "continuous":
+        laser_cfg["mode"] = "continuous"
+        return
+
+    # Keep legacy low-level mode (gated/startstop) if config already uses it,
+    # otherwise use the pulse alias and existing pulse_mode setting.
+    if current_mode_raw not in {"gated", "startstop"}:
+        laser_cfg["mode"] = "pulse"
+
+    pulse_freq = _optional_float(session_info.get("pulse_freq_hz"))
+    if pulse_freq is not None and pulse_freq > 0:
+        laser_cfg["freq_hz"] = float(pulse_freq)
 
 
 def _apply_prefixed_output_names(config: Dict[str, Any], file_prefix: str) -> None:
