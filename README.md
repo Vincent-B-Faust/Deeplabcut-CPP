@@ -233,7 +233,12 @@ References:
 
 ## Configuration Guide
 
-Use `config/config_example.yaml` as a template, then create your local runtime config (for example `config/config_windows_dryrun.yaml`).
+Use one of these templates as a starting point:
+- `config/config_example.yaml` (general template)
+- `config/config_example_continuous.yaml` (continuous/steady laser output)
+- `config/config_example_pulse.yaml` (pulse laser output)
+
+Then create your local runtime config (for example `config/config_windows_dryrun.yaml`).
 
 Note: always replace any machine-specific paths with your own absolute paths.
 

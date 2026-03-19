@@ -1,0 +1,118 @@
+# =========================
+# Project/session metadata
+# =========================
+project:
+  name: cpp_dlc_live
+  session_id: auto_timestamp
+  out_dir: D:\Data\LiuZY\Code\DeeplabcutCPP\output
+
+# Global fixed FPS timebase for runtime + recordings + analysis.
+fixed_fps: 20
+
+# =========================
+# Camera input
+# =========================
+camera:
+  source: 0
+  width: 1280
+  height: 720
+  fps_target: 20
+  # For live camera: enforce loop pacing to fps_target.
+  enforce_fps: true
+  # Exposure/gain options are camera-driver specific.
+  auto_exposure: true
+  exposure: -6.0
+  gain: 0.0
+  flip: false
+  rotate_deg: 0
+
+# =========================
+# DLC inference
+# =========================
+dlc:
+  strict_runtime: false
+  model_path: D:\Data\LiuZY\Code\DeeplabcutCPP\Deeplabcut-CPP\model\2chamberCPP\DLC_RTCPP_resnet_50_iteration-0_shuffle-1_snapshot-best-60.pt
+  backend: pytorch
+  device: cuda:0
+  # Representative point for chamber/laser logic.
+  bodypart: center
+  # Preview overlay bodyparts.
+  display_bodyparts: [center]
+  p_thresh: 0.6
+  smoothing:
+    enabled: true
+    window: 5
+
+# =========================
+# ROI chamber definitions
+# =========================
+roi:
+  type: polygon
+  chamber1:
+    - [260, 200]
+    - [260, 550]
+    - [610, 550]
+    - [610, 200]
+    - [260, 200]
+  chamber2:
+    - [610, 200]
+    - [960, 200]
+    - [960, 550]
+    - [610, 550]
+    - [610, 200]
+  strategy_on_neutral: "off"
+  debounce_frames: 8
+
+# =========================
+# Laser control (continuous)
+# =========================
+laser_control:
+  enabled: true
+  # Continuous mode: ON in chamber1, OFF otherwise.
+  mode: continuous
+  # DO line used for steady high/low level output.
+  continuous_line: cDAQ1Mod4/port0/line0
+  # Unknown/neutral handling policy (with strategy_on_neutral=off this is usually OFF).
+  unknown_policy: "off"
+  # If NI setup fails, fallback to dryrun for safety.
+  fallback_to_dryrun: true
+
+# =========================
+# Offline analysis settings
+# =========================
+analysis:
+  auto_after_run: true
+  cm_per_px: null
+  # Legacy fixed FPS key (kept for compatibility).
+  fixed_fps_hz: 20
+  output_plots: true
+
+# =========================
+# Preview (annotated) recording
+# =========================
+preview_recording:
+  enabled: true
+  filename: preview_overlay.mp4
+  codec: mp4v
+  fps: 20
+  overlay: true
+
+# =========================
+# Raw recording (no overlay)
+# =========================
+raw_recording:
+  enabled: true
+  filename: raw_video.mp4
+  codec: mp4v
+  fps: 20
+
+# =========================
+# Runtime issue logging
+# =========================
+runtime_logging:
+  enabled: true
+  issue_events_file: issue_events.jsonl
+  heartbeat_interval_s: 5.0
+  low_conf_warn_every_n: 30
+  inference_warn_ms: 80.0
+  fps_warn_below: 18.0
