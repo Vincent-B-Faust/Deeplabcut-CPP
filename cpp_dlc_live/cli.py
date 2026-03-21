@@ -379,12 +379,14 @@ def _run_auto_analysis(
     logger,
 ) -> None:
     analysis_cfg = config.get("analysis", {}) if isinstance(config.get("analysis", {}), dict) else {}
-    auto_analyze = bool(analysis_cfg.get("auto_after_run", True)) and (not bool(no_auto_analyze))
+    auto_after_run = _to_bool(analysis_cfg.get("auto_after_run"), default=True)
+    output_plots = _to_bool(analysis_cfg.get("output_plots"), default=True)
+    auto_analyze = auto_after_run and (not bool(no_auto_analyze))
     logger.info(
         "Auto analysis config: auto_after_run=%s no_auto_analyze=%s output_plots=%s",
-        bool(analysis_cfg.get("auto_after_run", True)),
+        auto_after_run,
         bool(no_auto_analyze),
-        bool(analysis_cfg.get("output_plots", True)),
+        output_plots,
     )
     if auto_analyze:
         logger.info("Auto analysis started for session: %s", session_dir)
@@ -393,9 +395,31 @@ def _run_auto_analysis(
                 session_dir=session_dir,
                 cm_per_px_override=None,
                 fixed_fps_hz_override=None,
-                output_plots_override=None,
+                output_plots_override=output_plots,
                 logger=logger,
             )
+            if output_plots:
+                expected_plots = _expected_plot_paths(session_dir)
+                generated = [p for p in expected_plots if p.exists()]
+                logger.info("Auto analysis plots generated: %d/%d", len(generated), len(expected_plots))
+                # Robust fallback: in some environments plot output may be skipped unexpectedly.
+                # Retry once with forced output_plots=True to avoid silent no-plot sessions.
+                if not generated:
+                    logger.warning("No auto analysis plots found, retrying once with forced output_plots=True")
+                    summary_path = analyze_session(
+                        session_dir=session_dir,
+                        cm_per_px_override=None,
+                        fixed_fps_hz_override=None,
+                        output_plots_override=True,
+                        logger=logger,
+                    )
+                    generated = [p for p in expected_plots if p.exists()]
+                    logger.info("Auto analysis retry plots generated: %d/%d", len(generated), len(expected_plots))
+                    if not generated:
+                        logger.error(
+                            "Auto analysis completed but no plot files were produced. "
+                            "Please check plot-related ERROR logs above."
+                        )
             logger.info("Auto analysis finished: %s", summary_path)
         except Exception:
             logger.exception("Auto analysis failed for session: %s", session_dir)
@@ -832,6 +856,20 @@ def _apply_prefixed_output_names(config: Dict[str, Any], file_prefix: str) -> No
     if isinstance(raw_cfg, dict):
         raw_filename = str(raw_cfg.get("filename", "raw_video.mp4"))
         raw_cfg["filename"] = ensure_prefixed_filename(raw_filename, file_prefix)
+
+
+def _expected_plot_paths(session_dir: Path) -> List[Path]:
+    file_prefix = detect_session_file_prefix(session_dir)
+    names = [
+        "figure1_trajectory_speed_heatmap.png",
+        "figure2_position_heatmap.png",
+        "figure3_chamber_dwell.png",
+        "speed_over_time.png",
+        "occupancy_over_time.png",
+    ]
+    if file_prefix:
+        return [session_dir / ensure_prefixed_filename(n, file_prefix) for n in names]
+    return [session_dir / n for n in names]
 
 
 if __name__ == "__main__":

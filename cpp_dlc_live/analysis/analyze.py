@@ -70,6 +70,7 @@ def analyze_session(
         if output_plots_override is not None
         else bool(analysis_cfg.get("output_plots", True))
     )
+    logger.info("Analyze options: output_plots=%s fixed_fps_hz=%s cm_per_px=%s", output_plots, fixed_fps_hz, cm_per_px)
 
     df = pd.read_csv(log_path)
     summary = compute_summary(df, cm_per_px=cm_per_px, fixed_fps_hz=fixed_fps_hz)

@@ -206,3 +206,35 @@ def test_apply_session_acclimation_settings() -> None:
     cli._apply_session_acclimation_settings(config, session_info)
     assert config["acclimation"]["enabled"] is True
     assert float(config["acclimation"]["duration_s"]) == 45.0
+
+
+def test_run_auto_analysis_forces_output_plots_from_config(tmp_path, monkeypatch) -> None:
+    config = {"analysis": {"auto_after_run": True, "output_plots": True}}
+    called = {}
+
+    def fake_analyze_session(**kwargs):
+        called["kwargs"] = kwargs
+        return tmp_path / "summary.csv"
+
+    monkeypatch.setattr(cli, "analyze_session", fake_analyze_session)
+    logger = cli.setup_logging(tmp_path, file_prefix=None)
+    cli._run_auto_analysis(config=config, no_auto_analyze=False, session_dir=tmp_path, logger=logger)
+
+    assert called["kwargs"]["output_plots_override"] is True
+
+
+def test_run_auto_analysis_retry_when_no_plot_generated(tmp_path, monkeypatch) -> None:
+    config = {"analysis": {"auto_after_run": True, "output_plots": True}}
+    calls = {"count": 0}
+
+    def fake_analyze_session(**kwargs):
+        calls["count"] += 1
+        return tmp_path / "summary.csv"
+
+    monkeypatch.setattr(cli, "analyze_session", fake_analyze_session)
+    monkeypatch.setattr(cli, "_expected_plot_paths", lambda _session_dir: [tmp_path / "figure1.png"])
+    logger = cli.setup_logging(tmp_path, file_prefix=None)
+    cli._run_auto_analysis(config=config, no_auto_analyze=False, session_dir=tmp_path, logger=logger)
+
+    # First run + one retry because no plot file exists.
+    assert calls["count"] == 2
