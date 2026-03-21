@@ -87,6 +87,12 @@ class RealtimeApp:
             "config": self.config,
             "file_prefix": self.file_prefix,
         }
+        acclimation_enabled, acclimation_duration_s = _resolve_acclimation_config(self.config)
+        metadata["acclimation"] = {
+            "enabled": acclimation_enabled,
+            "duration_s": acclimation_duration_s,
+            "actual_duration_s": 0.0,
+        }
         cfg_used = self.session_dir / self._prefixed_filename("config_used.yaml")
         if not cfg_used.exists():
             cfg_used = self.session_dir / "config_used.yaml"
@@ -180,6 +186,8 @@ class RealtimeApp:
             "session_start",
             level="INFO",
             duration_s=self.duration_s,
+            acclimation_enabled=acclimation_enabled,
+            acclimation_duration_s=acclimation_duration_s,
             preview=self.preview,
             offline_fast=self.offline_fast,
             fixed_fps=fixed_fps,
@@ -191,6 +199,27 @@ class RealtimeApp:
         try:
             camera = self._create_camera(fixed_fps=fixed_fps)
             camera_info = camera.camera_info()
+            if acclimation_enabled and acclimation_duration_s > 0:
+                self.logger.info(
+                    "Acclimation started: %.2f s (preview=%s, no recording/no logging)",
+                    acclimation_duration_s,
+                    self.preview,
+                )
+                issue_logger.log(
+                    "acclimation_start",
+                    level="INFO",
+                    duration_s=acclimation_duration_s,
+                    preview=self.preview,
+                )
+                acclimation_actual_s = self._run_acclimation_phase(camera, acclimation_duration_s)
+                metadata["acclimation"]["actual_duration_s"] = acclimation_actual_s
+                self.logger.info("Acclimation finished: %.2f s", acclimation_actual_s)
+                issue_logger.log(
+                    "acclimation_end",
+                    level="INFO",
+                    duration_s=acclimation_actual_s,
+                )
+
             runtime = build_runtime(self.config.get("dlc", {}), logger=self.logger)
             roi = ChamberROI.from_config(self.config.get("roi", {}))
             debouncer = Debouncer(
@@ -789,6 +818,34 @@ class RealtimeApp:
 
         return status_code
 
+    def _run_acclimation_phase(self, camera: CameraStream, duration_s: float) -> float:
+        if duration_s <= 0:
+            return 0.0
+
+        start = time.monotonic()
+        deadline = start + float(duration_s)
+        while True:
+            now = time.monotonic()
+            remaining_s = deadline - now
+            if remaining_s <= 0:
+                break
+
+            if self.preview:
+                ok, frame = camera.read()
+                if not ok or frame is None:
+                    raise RuntimeError("Camera stream ended or frame read failed during acclimation")
+                overlay = self._render_acclimation_frame(frame, remaining_s=remaining_s)
+                cv2.imshow("cpp_dlc_live", overlay)
+                key = cv2.waitKey(1) & 0xFF
+                if key in (ord("q"), 27):
+                    self.logger.info("Preview exit key pressed during acclimation")
+                    raise KeyboardInterrupt
+            else:
+                # Headless mode: still honor the acclimation wait without consuming/recording frames.
+                time.sleep(min(0.05, max(0.0, remaining_s)))
+
+        return max(0.0, time.monotonic() - start)
+
     def _create_camera(self, fixed_fps: Optional[float] = None) -> CameraStream:
         cam_cfg = dict(self.config.get("camera", {}))
         if self.camera_source_override is not None:
@@ -941,6 +998,29 @@ class RealtimeApp:
             vis,
             f"time: {RealtimeApp._format_elapsed_hhmmss(elapsed_s)}",
             (10, 164),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.7,
+            (255, 255, 255),
+            2,
+        )
+        return vis
+
+    @staticmethod
+    def _render_acclimation_frame(frame: np.ndarray, remaining_s: float) -> np.ndarray:
+        vis = frame.copy()
+        cv2.putText(
+            vis,
+            "acclimation: ON (not recording)",
+            (10, 24),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.7,
+            (255, 255, 255),
+            2,
+        )
+        cv2.putText(
+            vis,
+            f"remaining: {RealtimeApp._format_elapsed_hhmmss(remaining_s)}",
+            (10, 52),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.7,
             (255, 255, 255),
@@ -1111,3 +1191,27 @@ def _format_laser_mode_overlay(laser_cfg: Dict[str, Any]) -> str:
         return "pulse"
 
     return mode_raw or "unknown"
+
+
+def _resolve_acclimation_config(config: Dict[str, Any]) -> Tuple[bool, float]:
+    acclimation_cfg = config.get("acclimation", {})
+    if not isinstance(acclimation_cfg, dict):
+        acclimation_cfg = {}
+
+    enabled = _optional_bool(acclimation_cfg.get("enabled"))
+    if enabled is None:
+        # Backward-compatible fallback: allow session_info to drive acclimation.
+        session_info = config.get("session_info", {})
+        if isinstance(session_info, dict):
+            enabled = _optional_bool(session_info.get("acclimation_enabled"))
+    enabled = bool(enabled) if enabled is not None else False
+
+    duration_s = _optional_float(acclimation_cfg.get("duration_s"))
+    if duration_s is None:
+        session_info = config.get("session_info", {})
+        if isinstance(session_info, dict):
+            duration_s = _optional_float(session_info.get("acclimation_duration_s"))
+
+    if not enabled or duration_s is None or duration_s <= 0:
+        return False, 0.0
+    return True, float(duration_s)

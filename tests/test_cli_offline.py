@@ -143,7 +143,11 @@ def test_resolve_session_info_no_prompt_includes_laser_mode_and_freq() -> None:
         "laser_control": {
             "mode": "startstop",
             "freq_hz": 25.0,
-        }
+        },
+        "acclimation": {
+            "enabled": True,
+            "duration_s": 30.0,
+        },
     }
     args = Namespace(
         mouse_id="M001",
@@ -156,6 +160,8 @@ def test_resolve_session_info_no_prompt_includes_laser_mode_and_freq() -> None:
     info = cli._resolve_session_info(config, args)
     assert info["laser_mode"] == "pulse"
     assert float(info["pulse_freq_hz"]) == 25.0
+    assert info["acclimation_enabled"] is True
+    assert float(info["acclimation_duration_s"]) == 30.0
 
 
 def test_apply_session_laser_settings_preserves_legacy_pulse_mode() -> None:
@@ -189,3 +195,14 @@ def test_apply_session_laser_settings_switches_to_continuous() -> None:
 
     cli._apply_session_laser_settings(config, session_info)
     assert config["laser_control"]["mode"] == "continuous"
+
+
+def test_apply_session_acclimation_settings() -> None:
+    config = {"acclimation": {"enabled": False, "duration_s": 0}}
+    session_info = {
+        "acclimation_enabled": True,
+        "acclimation_duration_s": 45.0,
+    }
+    cli._apply_session_acclimation_settings(config, session_info)
+    assert config["acclimation"]["enabled"] is True
+    assert float(config["acclimation"]["duration_s"]) == 45.0

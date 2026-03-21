@@ -8,6 +8,16 @@ session_info:
   mouse_id: "M001"
   group: "Control"
   experiment_duration_s: 600
+  # Set by pre-run popup:
+  laser_mode: "pulse"
+  pulse_freq_hz: 20.0
+  acclimation_enabled: false
+  acclimation_duration_s: 0
+
+# Optional pre-experiment acclimation period (preview only, no saving/no logging).
+acclimation:
+  enabled: false
+  duration_s: 0
 camera:
   source: C:/Users/admin/Downloads/Trial_11_7381.avi
   width: 1280

@@ -249,6 +249,7 @@ Note: always replace any machine-specific paths with your own absolute paths.
 - `project`: session naming and output location
 - `fixed_fps`: optional global fixed FPS for runtime + recording + analysis
 - `session_info`: mouse/group/planned duration metadata (used by naming prompt)
+- `acclimation`: optional pre-experiment acclimation period (preview only, no saving)
 - `camera`: source and transform options
 - `dlc`: model path/backend/bodypart/confidence/smoothing
 - `roi`: chamber polygons/rectangles + neutral policy + debounce
@@ -275,7 +276,17 @@ Note: always replace any machine-specific paths with your own absolute paths.
 - `session_info.experiment_duration_s`: planned duration in seconds
 - `session_info.laser_mode`: `continuous` or `pulse` (selected in pre-run popup)
 - `session_info.pulse_freq_hz`: pulse frequency when `laser_mode=pulse`
+- `session_info.acclimation_enabled`: whether to run pre-experiment acclimation
+- `session_info.acclimation_duration_s`: acclimation duration in seconds
 - `run_realtime` opens a popup before start (with history dropdowns) to confirm/edit these values.
+
+### `acclimation`
+- `acclimation.enabled`: `true` | `false`
+- `acclimation.duration_s`: acclimation wait duration in seconds
+- During acclimation:
+  - preview remains visible,
+  - countdown is shown (`remaining HH:MM:SS.mmm`),
+  - no CSV/video is saved.
 
 ### `camera`
 - `camera.source`: camera index (`0`) or video path/URL
@@ -367,6 +378,14 @@ session_info:
   mouse_id: M001
   group: Control
   experiment_duration_s: 600
+  laser_mode: pulse
+  pulse_freq_hz: 20
+  acclimation_enabled: false
+  acclimation_duration_s: 0
+
+acclimation:
+  enabled: false
+  duration_s: 0
 
 camera:
   source: C:/data/videos/test.avi
@@ -467,6 +486,7 @@ Notes:
 - Set both `preview_recording.enabled=true` and `raw_recording.enabled=true` to save both overlay and raw videos simultaneously.
 - On input video EOF, run exits normally.
 - Session folder name is expanded to include `timestamp + mouse_id + group + duration + laser_mode` (pulse also includes frequency in suffix).
+- Optional acclimation runs before experiment timer starts.
 - Output files are prefixed with resolved session id.
 - By default, analysis is auto-run after each successful realtime session and writes Figure1–Figure5 plus summary.
 - Preview overlay now shows both `laser` state (`0/1`) and `laser_mode` (`continuous` or `pulse xx.xHz`).

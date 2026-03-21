@@ -11,6 +11,8 @@ def collect_session_info(
     default_duration_s: Optional[float] = None,
     default_laser_mode: str = "pulse",
     default_pulse_freq_hz: Optional[float] = None,
+    default_acclimation_enabled: bool = False,
+    default_acclimation_duration_s: Optional[float] = None,
     history_path: Optional[Path] = None,
 ) -> Dict[str, Any]:
     history_file = history_path or (Path.home() / ".cpp_dlc_live_session_history.json")
@@ -23,6 +25,10 @@ def collect_session_info(
     default_pulse_freq_text = ""
     if default_pulse_freq_hz is not None:
         default_pulse_freq_text = _format_duration(default_pulse_freq_hz)
+    default_acclimation_mode_text = "on" if bool(default_acclimation_enabled) else "off"
+    default_acclimation_duration_text = ""
+    if default_acclimation_duration_s is not None and float(default_acclimation_duration_s) > 0:
+        default_acclimation_duration_text = _format_duration(default_acclimation_duration_s)
 
     try:
         values = _prompt_with_tk(
@@ -31,11 +37,15 @@ def collect_session_info(
             duration_default=default_duration_text,
             laser_mode_default=default_mode_text,
             pulse_freq_default=default_pulse_freq_text,
+            acclimation_mode_default=default_acclimation_mode_text,
+            acclimation_duration_default=default_acclimation_duration_text,
             mouse_history=history.get("mouse_id", []),
             group_history=history.get("group", []),
             duration_history=history.get("experiment_duration_s", []),
             laser_mode_history=history.get("laser_mode", []),
             pulse_freq_history=history.get("pulse_freq_hz", []),
+            acclimation_mode_history=history.get("acclimation_enabled", []),
+            acclimation_duration_history=history.get("acclimation_duration_s", []),
         )
     except Exception:
         values = _prompt_in_console(
@@ -44,6 +54,8 @@ def collect_session_info(
             duration_default=default_duration_text,
             laser_mode_default=default_mode_text,
             pulse_freq_default=default_pulse_freq_text,
+            acclimation_mode_default=default_acclimation_mode_text,
+            acclimation_duration_default=default_acclimation_duration_text,
         )
 
     mouse_id = str(values["mouse_id"]).strip()
@@ -53,6 +65,13 @@ def collect_session_info(
     pulse_freq_hz: Optional[float] = None
     if laser_mode == "pulse":
         pulse_freq_hz = _parse_positive_float(values.get("pulse_freq_hz", default_pulse_freq_text), "脉冲频率")
+    acclimation_enabled = _parse_toggle(values.get("acclimation_enabled", default_acclimation_mode_text))
+    acclimation_duration_s = 0.0
+    if acclimation_enabled:
+        acclimation_duration_s = _parse_positive_float(
+            values.get("acclimation_duration_s", default_acclimation_duration_text),
+            "适应时长",
+        )
 
     _update_history(history, "mouse_id", mouse_id)
     _update_history(history, "group", group)
@@ -60,6 +79,9 @@ def collect_session_info(
     _update_history(history, "laser_mode", laser_mode)
     if pulse_freq_hz is not None:
         _update_history(history, "pulse_freq_hz", _format_duration(pulse_freq_hz))
+    _update_history(history, "acclimation_enabled", ("on" if acclimation_enabled else "off"))
+    if acclimation_enabled and acclimation_duration_s > 0:
+        _update_history(history, "acclimation_duration_s", _format_duration(acclimation_duration_s))
     _save_history(history_file, history)
 
     return {
@@ -68,6 +90,8 @@ def collect_session_info(
         "experiment_duration_s": duration_s,
         "laser_mode": laser_mode,
         "pulse_freq_hz": pulse_freq_hz,
+        "acclimation_enabled": acclimation_enabled,
+        "acclimation_duration_s": acclimation_duration_s,
     }
 
 
@@ -77,11 +101,15 @@ def _prompt_with_tk(
     duration_default: str,
     laser_mode_default: str,
     pulse_freq_default: str,
+    acclimation_mode_default: str,
+    acclimation_duration_default: str,
     mouse_history: List[str],
     group_history: List[str],
     duration_history: List[str],
     laser_mode_history: List[str],
     pulse_freq_history: List[str],
+    acclimation_mode_history: List[str],
+    acclimation_duration_history: List[str],
 ) -> Dict[str, str]:
     import tkinter as tk
     from tkinter import messagebox, ttk
@@ -97,30 +125,55 @@ def _prompt_with_tk(
     ttk.Label(frame, text="实验组别").grid(row=1, column=0, sticky="w", pady=(0, 6))
     ttk.Label(frame, text="实验时长(s)").grid(row=2, column=0, sticky="w", pady=(0, 6))
     ttk.Label(frame, text="激光模式").grid(row=3, column=0, sticky="w", pady=(0, 6))
-    ttk.Label(frame, text="脉冲频率(Hz)").grid(row=4, column=0, sticky="w", pady=(0, 10))
+    ttk.Label(frame, text="脉冲频率(Hz)").grid(row=4, column=0, sticky="w", pady=(0, 6))
+    ttk.Label(frame, text="适应期").grid(row=5, column=0, sticky="w", pady=(0, 6))
+    ttk.Label(frame, text="适应时长(s)").grid(row=6, column=0, sticky="w", pady=(0, 10))
 
     mouse_values = _merge_history(mouse_default, mouse_history)
     group_values = _merge_history(group_default, group_history)
     duration_values = _merge_history(duration_default, duration_history)
     laser_mode_values = _merge_history(laser_mode_default, laser_mode_history, allowed={"continuous", "pulse"})
     pulse_freq_values = _merge_history(pulse_freq_default, pulse_freq_history)
+    acclimation_mode_values = _merge_history(
+        acclimation_mode_default,
+        acclimation_mode_history,
+        allowed={"on", "off"},
+    )
+    acclimation_duration_values = _merge_history(acclimation_duration_default, acclimation_duration_history)
 
     mouse_var = tk.StringVar(value=mouse_default)
     group_var = tk.StringVar(value=group_default)
     duration_var = tk.StringVar(value=duration_default)
     laser_mode_var = tk.StringVar(value=laser_mode_default)
     pulse_freq_var = tk.StringVar(value=pulse_freq_default)
+    acclimation_mode_var = tk.StringVar(value=acclimation_mode_default)
+    acclimation_duration_var = tk.StringVar(value=acclimation_duration_default)
 
     mouse_box = ttk.Combobox(frame, textvariable=mouse_var, values=mouse_values, width=30)
     group_box = ttk.Combobox(frame, textvariable=group_var, values=group_values, width=30)
     duration_box = ttk.Combobox(frame, textvariable=duration_var, values=duration_values, width=30)
     laser_mode_box = ttk.Combobox(frame, textvariable=laser_mode_var, values=laser_mode_values, width=30, state="readonly")
     pulse_freq_box = ttk.Combobox(frame, textvariable=pulse_freq_var, values=pulse_freq_values, width=30)
+    acclimation_mode_box = ttk.Combobox(
+        frame,
+        textvariable=acclimation_mode_var,
+        values=acclimation_mode_values,
+        width=30,
+        state="readonly",
+    )
+    acclimation_duration_box = ttk.Combobox(
+        frame,
+        textvariable=acclimation_duration_var,
+        values=acclimation_duration_values,
+        width=30,
+    )
     mouse_box.grid(row=0, column=1, sticky="ew", pady=(0, 6))
     group_box.grid(row=1, column=1, sticky="ew", pady=(0, 6))
     duration_box.grid(row=2, column=1, sticky="ew", pady=(0, 6))
     laser_mode_box.grid(row=3, column=1, sticky="ew", pady=(0, 6))
-    pulse_freq_box.grid(row=4, column=1, sticky="ew", pady=(0, 10))
+    pulse_freq_box.grid(row=4, column=1, sticky="ew", pady=(0, 6))
+    acclimation_mode_box.grid(row=5, column=1, sticky="ew", pady=(0, 6))
+    acclimation_duration_box.grid(row=6, column=1, sticky="ew", pady=(0, 10))
 
     result: Dict[str, str] = {}
     cancelled = {"value": False}
@@ -129,12 +182,21 @@ def _prompt_with_tk(
         mode = _normalize_laser_mode(laser_mode_var.get())
         pulse_freq_box.configure(state=("normal" if mode == "pulse" else "disabled"))
 
+    def _on_acclimation_changed(*_args: Any) -> None:
+        try:
+            enabled = _parse_toggle(acclimation_mode_var.get())
+        except ValueError:
+            enabled = False
+        acclimation_duration_box.configure(state=("normal" if enabled else "disabled"))
+
     def on_ok() -> None:
         mouse_id = mouse_var.get().strip()
         group = group_var.get().strip()
         duration_text = duration_var.get().strip()
         laser_mode = _normalize_laser_mode(laser_mode_var.get())
         pulse_freq_text = pulse_freq_var.get().strip()
+        acclimation_enabled = _parse_toggle(acclimation_mode_var.get())
+        acclimation_duration_text = acclimation_duration_var.get().strip()
         if not mouse_id:
             messagebox.showerror("输入错误", "小鼠编号不能为空")
             return
@@ -145,6 +207,8 @@ def _prompt_with_tk(
             _parse_positive_float(duration_text, "实验时长")
             if laser_mode == "pulse":
                 _parse_positive_float(pulse_freq_text, "脉冲频率")
+            if acclimation_enabled:
+                _parse_positive_float(acclimation_duration_text, "适应时长")
         except ValueError as exc:
             messagebox.showerror("输入错误", str(exc))
             return
@@ -153,6 +217,8 @@ def _prompt_with_tk(
         result["experiment_duration_s"] = duration_text
         result["laser_mode"] = laser_mode
         result["pulse_freq_hz"] = pulse_freq_text
+        result["acclimation_enabled"] = "on" if acclimation_enabled else "off"
+        result["acclimation_duration_s"] = acclimation_duration_text if acclimation_enabled else "0"
         root.destroy()
 
     def on_cancel() -> None:
@@ -160,13 +226,15 @@ def _prompt_with_tk(
         root.destroy()
 
     btn_frame = ttk.Frame(frame)
-    btn_frame.grid(row=5, column=0, columnspan=2, sticky="e")
+    btn_frame.grid(row=7, column=0, columnspan=2, sticky="e")
     ttk.Button(btn_frame, text="取消", command=on_cancel).grid(row=0, column=0, padx=(0, 8))
     ttk.Button(btn_frame, text="开始记录", command=on_ok).grid(row=0, column=1)
 
     frame.columnconfigure(1, weight=1)
     laser_mode_var.trace_add("write", _on_mode_changed)
+    acclimation_mode_var.trace_add("write", _on_acclimation_changed)
     _on_mode_changed()
+    _on_acclimation_changed()
     mouse_box.focus_set()
     root.bind("<Return>", lambda _evt: on_ok())
     root.protocol("WM_DELETE_WINDOW", on_cancel)
@@ -185,12 +253,24 @@ def _prompt_in_console(
     duration_default: str,
     laser_mode_default: str,
     pulse_freq_default: str,
+    acclimation_mode_default: str,
+    acclimation_duration_default: str,
 ) -> Dict[str, str]:
     mouse_prompt = f"小鼠编号 [{mouse_default}]: " if mouse_default else "小鼠编号: "
     group_prompt = f"实验组别 [{group_default}]: " if group_default else "实验组别: "
     duration_prompt = f"实验时长(s) [{duration_default}]: " if duration_default else "实验时长(s): "
     mode_prompt = f"激光模式 continuous|pulse [{laser_mode_default}]: " if laser_mode_default else "激光模式 continuous|pulse: "
     pulse_prompt = f"脉冲频率(Hz) [{pulse_freq_default}]: " if pulse_freq_default else "脉冲频率(Hz): "
+    acclimation_prompt = (
+        f"是否启用适应期 on|off [{acclimation_mode_default}]: "
+        if acclimation_mode_default
+        else "是否启用适应期 on|off: "
+    )
+    acclimation_duration_prompt = (
+        f"适应时长(s) [{acclimation_duration_default}]: "
+        if acclimation_duration_default
+        else "适应时长(s): "
+    )
 
     mouse_id = input(mouse_prompt).strip() or mouse_default
     group = input(group_prompt).strip() or group_default
@@ -200,6 +280,10 @@ def _prompt_in_console(
     pulse_freq_text = ""
     if laser_mode == "pulse":
         pulse_freq_text = input(pulse_prompt).strip() or pulse_freq_default
+    acclimation_enabled = _parse_toggle(input(acclimation_prompt).strip() or acclimation_mode_default)
+    acclimation_duration_text = "0"
+    if acclimation_enabled:
+        acclimation_duration_text = input(acclimation_duration_prompt).strip() or acclimation_duration_default
 
     if not mouse_id:
         raise ValueError("小鼠编号不能为空")
@@ -208,6 +292,8 @@ def _prompt_in_console(
     _parse_positive_float(duration_text, "实验时长")
     if laser_mode == "pulse":
         _parse_positive_float(pulse_freq_text, "脉冲频率")
+    if acclimation_enabled:
+        _parse_positive_float(acclimation_duration_text, "适应时长")
 
     return {
         "mouse_id": mouse_id,
@@ -215,6 +301,8 @@ def _prompt_in_console(
         "experiment_duration_s": duration_text,
         "laser_mode": laser_mode,
         "pulse_freq_hz": pulse_freq_text,
+        "acclimation_enabled": ("on" if acclimation_enabled else "off"),
+        "acclimation_duration_s": acclimation_duration_text,
     }
 
 
@@ -244,6 +332,15 @@ def _normalize_laser_mode(value: str) -> str:
     raise ValueError(f"激光模式必须是 continuous 或 pulse，当前为: {value}")
 
 
+def _parse_toggle(value: str) -> bool:
+    text = str(value).strip().lower()
+    if text in {"on", "true", "1", "yes", "y"}:
+        return True
+    if text in {"off", "false", "0", "no", "n", ""}:
+        return False
+    raise ValueError(f"开关值必须是 on 或 off，当前为: {value}")
+
+
 def _load_history(path: Path) -> Dict[str, List[str]]:
     if not path.exists():
         return {
@@ -252,6 +349,8 @@ def _load_history(path: Path) -> Dict[str, List[str]]:
             "experiment_duration_s": [],
             "laser_mode": [],
             "pulse_freq_hz": [],
+            "acclimation_enabled": [],
+            "acclimation_duration_s": [],
         }
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
@@ -262,6 +361,8 @@ def _load_history(path: Path) -> Dict[str, List[str]]:
             "experiment_duration_s": [],
             "laser_mode": [],
             "pulse_freq_hz": [],
+            "acclimation_enabled": [],
+            "acclimation_duration_s": [],
         }
     if not isinstance(raw, dict):
         return {
@@ -270,9 +371,19 @@ def _load_history(path: Path) -> Dict[str, List[str]]:
             "experiment_duration_s": [],
             "laser_mode": [],
             "pulse_freq_hz": [],
+            "acclimation_enabled": [],
+            "acclimation_duration_s": [],
         }
     out: Dict[str, List[str]] = {}
-    for key in ("mouse_id", "group", "experiment_duration_s", "laser_mode", "pulse_freq_hz"):
+    for key in (
+        "mouse_id",
+        "group",
+        "experiment_duration_s",
+        "laser_mode",
+        "pulse_freq_hz",
+        "acclimation_enabled",
+        "acclimation_duration_s",
+    ):
         values = raw.get(key, [])
         if isinstance(values, list):
             out[key] = [str(v).strip() for v in values if str(v).strip()]

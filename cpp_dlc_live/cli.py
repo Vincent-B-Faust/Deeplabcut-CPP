@@ -190,6 +190,7 @@ def _cmd_run_realtime(args: argparse.Namespace) -> None:
     config["session_info"] = session_info
     args.duration_s = float(session_info["experiment_duration_s"])
     _apply_session_laser_settings(config, session_info)
+    _apply_session_acclimation_settings(config, session_info)
 
     session_dir = prepare_session_dir(config, out_dir_override=args.out_dir)
     file_prefix = str(config.setdefault("project", {}).get("resolved_file_prefix", "session"))
@@ -303,6 +304,12 @@ def _run_offline_once(
         # Offline replay should run as fast as possible for file inputs.
         cam_cfg["file_realtime_throttle"] = False
         cam_cfg["enforce_fps"] = False
+
+    acclimation_cfg = config.setdefault("acclimation", {})
+    if isinstance(acclimation_cfg, dict):
+        # Offline replay should not wait for acclimation.
+        acclimation_cfg["enabled"] = False
+        acclimation_cfg["duration_s"] = 0.0
 
     laser_cfg = config.setdefault("laser_control", {})
     if isinstance(laser_cfg, dict):
@@ -558,6 +565,19 @@ def _optional_float(value: Any) -> Optional[float]:
     return float(text)
 
 
+def _to_bool(value: Any, default: bool = False) -> bool:
+    if value is None:
+        return bool(default)
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "on", "y"}:
+        return True
+    if text in {"0", "false", "no", "off", "n", ""}:
+        return False
+    return bool(default)
+
+
 def _is_session_dir(path: Path) -> bool:
     if not path.is_dir():
         return False
@@ -646,12 +666,17 @@ def _discover_session_dirs(root_dir: Path, recursive: bool) -> List[Path]:
 def _resolve_session_info(config: Dict[str, Any], args: argparse.Namespace) -> Dict[str, Any]:
     existing = config.get("session_info", {}) if isinstance(config.get("session_info", {}), dict) else {}
     laser_cfg = config.get("laser_control", {}) if isinstance(config.get("laser_control", {}), dict) else {}
+    acclimation_cfg = config.get("acclimation", {}) if isinstance(config.get("acclimation", {}), dict) else {}
 
     default_mouse = str(args.mouse_id if args.mouse_id is not None else existing.get("mouse_id", "")).strip()
     default_group = str(args.group if args.group is not None else existing.get("group", "")).strip()
     default_laser_mode = str(existing.get("laser_mode", "")).strip() or str(laser_cfg.get("mode", "pulse")).strip()
     default_pulse_freq = existing.get("pulse_freq_hz", laser_cfg.get("freq_hz"))
     pulse_freq_seed = _optional_float(default_pulse_freq)
+    default_acclimation_enabled_raw = existing.get("acclimation_enabled", acclimation_cfg.get("enabled", False))
+    default_acclimation_enabled = _to_bool(default_acclimation_enabled_raw, default=False)
+    default_acclimation_duration = existing.get("acclimation_duration_s", acclimation_cfg.get("duration_s"))
+    acclimation_duration_seed = _optional_float(default_acclimation_duration)
 
     duration_seed = args.experiment_duration_s
     if duration_seed is None:
@@ -673,12 +698,20 @@ def _resolve_session_info(config: Dict[str, Any], args: argparse.Namespace) -> D
         pulse_freq_hz = (pulse_freq_seed if pulse_freq_seed is not None else 20.0) if laser_mode == "pulse" else None
         if laser_mode == "pulse" and (pulse_freq_hz is None or pulse_freq_hz <= 0):
             raise ValueError("laser pulse_freq_hz must be > 0 when laser_mode=pulse")
+        acclimation_enabled = default_acclimation_enabled
+        acclimation_duration_s = 0.0
+        if acclimation_enabled:
+            if acclimation_duration_seed is None or acclimation_duration_seed <= 0:
+                raise ValueError("acclimation duration must be > 0 when acclimation_enabled=true")
+            acclimation_duration_s = float(acclimation_duration_seed)
         return {
             "mouse_id": mouse_id,
             "group": group,
             "experiment_duration_s": duration_s,
             "laser_mode": laser_mode,
             "pulse_freq_hz": pulse_freq_hz,
+            "acclimation_enabled": acclimation_enabled,
+            "acclimation_duration_s": acclimation_duration_s,
         }
 
     info = collect_session_info(
@@ -687,6 +720,8 @@ def _resolve_session_info(config: Dict[str, Any], args: argparse.Namespace) -> D
         default_duration_s=(float(duration_seed) if duration_seed is not None else None),
         default_laser_mode=_normalize_user_laser_mode(default_laser_mode),
         default_pulse_freq_hz=pulse_freq_seed,
+        default_acclimation_enabled=default_acclimation_enabled,
+        default_acclimation_duration_s=acclimation_duration_seed,
     )
     info["mouse_id"] = sanitize_name_component(info.get("mouse_id", ""))
     info["group"] = sanitize_name_component(info.get("group", ""))
@@ -700,6 +735,13 @@ def _resolve_session_info(config: Dict[str, Any], args: argparse.Namespace) -> D
             raise ValueError("laser pulse_freq_hz must be > 0 when laser_mode=pulse")
     else:
         info["pulse_freq_hz"] = None
+    info["acclimation_enabled"] = _to_bool(info.get("acclimation_enabled"), default=False)
+    info["acclimation_duration_s"] = _optional_float(info.get("acclimation_duration_s"))
+    if info["acclimation_enabled"]:
+        if info["acclimation_duration_s"] is None or info["acclimation_duration_s"] <= 0:
+            raise ValueError("acclimation duration must be > 0 when acclimation_enabled=true")
+    else:
+        info["acclimation_duration_s"] = 0.0
     return info
 
 
@@ -763,6 +805,16 @@ def _apply_session_laser_settings(config: Dict[str, Any], session_info: Dict[str
     pulse_freq = _optional_float(session_info.get("pulse_freq_hz"))
     if pulse_freq is not None and pulse_freq > 0:
         laser_cfg["freq_hz"] = float(pulse_freq)
+
+
+def _apply_session_acclimation_settings(config: Dict[str, Any], session_info: Dict[str, Any]) -> None:
+    acclimation_cfg = config.setdefault("acclimation", {})
+    if not isinstance(acclimation_cfg, dict):
+        return
+    enabled = _to_bool(session_info.get("acclimation_enabled"), default=False)
+    duration_s = _optional_float(session_info.get("acclimation_duration_s"))
+    acclimation_cfg["enabled"] = bool(enabled)
+    acclimation_cfg["duration_s"] = float(duration_s) if enabled and duration_s is not None and duration_s > 0 else 0.0
 
 
 def _apply_prefixed_output_names(config: Dict[str, Any], file_prefix: str) -> None:
