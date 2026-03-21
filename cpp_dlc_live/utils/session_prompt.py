@@ -133,11 +133,21 @@ def _prompt_with_tk(
     group_values = _merge_history(group_default, group_history)
     duration_values = _merge_history(duration_default, duration_history)
     laser_mode_values = _merge_history(laser_mode_default, laser_mode_history, allowed={"continuous", "pulse"})
+    laser_mode_values = _ensure_choices(
+        values=laser_mode_values,
+        required=["continuous", "pulse"],
+        preferred=laser_mode_default,
+    )
     pulse_freq_values = _merge_history(pulse_freq_default, pulse_freq_history)
     acclimation_mode_values = _merge_history(
         acclimation_mode_default,
         acclimation_mode_history,
         allowed={"on", "off"},
+    )
+    acclimation_mode_values = _ensure_choices(
+        values=acclimation_mode_values,
+        required=["on", "off"],
+        preferred=acclimation_mode_default,
     )
     acclimation_duration_values = _merge_history(acclimation_duration_default, acclimation_duration_history)
 
@@ -410,3 +420,16 @@ def _merge_history(default: str, history: List[str], allowed: Optional[set[str]]
         if value and (allowed is None or value in allowed) and value not in merged:
             merged.append(value)
     return merged
+
+
+def _ensure_choices(values: List[str], required: List[str], preferred: Optional[str] = None) -> List[str]:
+    out: List[str] = []
+    if preferred and preferred in required and preferred not in out:
+        out.append(preferred)
+    for value in values:
+        if value and value not in out:
+            out.append(value)
+    for value in required:
+        if value not in out:
+            out.append(value)
+    return out
