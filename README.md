@@ -339,6 +339,7 @@ Note: always replace any machine-specific paths with your own absolute paths.
 
 ### `analysis`
 - `analysis.auto_after_run`: run `analyze_session` automatically right after successful realtime run
+- `analysis.auto_after_run_subprocess`: run auto-analysis in a fresh subprocess (default `true`, recommended on Windows to avoid OpenMP conflicts after PyTorch runtime)
 - `analysis.cm_per_px`
 - `analysis.fixed_fps_hz`: optional fixed timebase for speed/occupancy metrics (ignores frame timestamp jitter)
 - `analysis.output_plots`

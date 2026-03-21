@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
@@ -381,45 +382,30 @@ def _run_auto_analysis(
     analysis_cfg = config.get("analysis", {}) if isinstance(config.get("analysis", {}), dict) else {}
     auto_after_run = _to_bool(analysis_cfg.get("auto_after_run"), default=True)
     output_plots = _to_bool(analysis_cfg.get("output_plots"), default=True)
+    use_subprocess = _to_bool(analysis_cfg.get("auto_after_run_subprocess"), default=True)
     auto_analyze = auto_after_run and (not bool(no_auto_analyze))
     logger.info(
-        "Auto analysis config: auto_after_run=%s no_auto_analyze=%s output_plots=%s",
+        "Auto analysis config: auto_after_run=%s no_auto_analyze=%s output_plots=%s use_subprocess=%s",
         auto_after_run,
         bool(no_auto_analyze),
         output_plots,
+        use_subprocess,
     )
     if auto_analyze:
         logger.info("Auto analysis started for session: %s", session_dir)
         try:
-            summary_path = analyze_session(
-                session_dir=session_dir,
-                cm_per_px_override=None,
-                fixed_fps_hz_override=None,
-                output_plots_override=output_plots,
-                logger=logger,
-            )
-            if output_plots:
-                expected_plots = _expected_plot_paths(session_dir)
-                generated = [p for p in expected_plots if p.exists()]
-                logger.info("Auto analysis plots generated: %d/%d", len(generated), len(expected_plots))
-                # Robust fallback: in some environments plot output may be skipped unexpectedly.
-                # Retry once with forced output_plots=True to avoid silent no-plot sessions.
-                if not generated:
-                    logger.warning("No auto analysis plots found, retrying once with forced output_plots=True")
-                    summary_path = analyze_session(
-                        session_dir=session_dir,
-                        cm_per_px_override=None,
-                        fixed_fps_hz_override=None,
-                        output_plots_override=True,
-                        logger=logger,
-                    )
-                    generated = [p for p in expected_plots if p.exists()]
-                    logger.info("Auto analysis retry plots generated: %d/%d", len(generated), len(expected_plots))
-                    if not generated:
-                        logger.error(
-                            "Auto analysis completed but no plot files were produced. "
-                            "Please check plot-related ERROR logs above."
-                        )
+            if use_subprocess:
+                summary_path = _run_auto_analysis_subprocess(
+                    session_dir=session_dir,
+                    output_plots=output_plots,
+                    logger=logger,
+                )
+            else:
+                summary_path = _run_auto_analysis_inprocess(
+                    session_dir=session_dir,
+                    output_plots=output_plots,
+                    logger=logger,
+                )
             logger.info("Auto analysis finished: %s", summary_path)
         except Exception:
             logger.exception("Auto analysis failed for session: %s", session_dir)
@@ -870,6 +856,115 @@ def _expected_plot_paths(session_dir: Path) -> List[Path]:
     if file_prefix:
         return [session_dir / ensure_prefixed_filename(n, file_prefix) for n in names]
     return [session_dir / n for n in names]
+
+
+def _expected_summary_path(session_dir: Path) -> Path:
+    file_prefix = detect_session_file_prefix(session_dir)
+    name = ensure_prefixed_filename("summary.csv", file_prefix) if file_prefix else "summary.csv"
+    return session_dir / name
+
+
+def _run_auto_analysis_inprocess(
+    session_dir: Path,
+    output_plots: bool,
+    logger,
+) -> Path:
+    summary_path = analyze_session(
+        session_dir=session_dir,
+        cm_per_px_override=None,
+        fixed_fps_hz_override=None,
+        output_plots_override=output_plots,
+        logger=logger,
+    )
+    if output_plots:
+        expected_plots = _expected_plot_paths(session_dir)
+        generated = [p for p in expected_plots if p.exists()]
+        logger.info("Auto analysis plots generated: %d/%d", len(generated), len(expected_plots))
+        # Robust fallback: in some environments plot output may be skipped unexpectedly.
+        # Retry once with forced output_plots=True to avoid silent no-plot sessions.
+        if not generated:
+            logger.warning("No auto analysis plots found, retrying once with forced output_plots=True")
+            summary_path = analyze_session(
+                session_dir=session_dir,
+                cm_per_px_override=None,
+                fixed_fps_hz_override=None,
+                output_plots_override=True,
+                logger=logger,
+            )
+            generated = [p for p in expected_plots if p.exists()]
+            logger.info("Auto analysis retry plots generated: %d/%d", len(generated), len(expected_plots))
+            if not generated:
+                logger.error(
+                    "Auto analysis completed but no plot files were produced. "
+                    "Please check plot-related ERROR logs above."
+                )
+    return summary_path
+
+
+def _run_auto_analysis_subprocess(
+    session_dir: Path,
+    output_plots: bool,
+    logger,
+) -> Path:
+    cmd = [sys.executable, "-m", "cpp_dlc_live.cli", "analyze_session", "--session_dir", str(session_dir)]
+    if not output_plots:
+        cmd.append("--no_plots")
+
+    def _run_once() -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            cmd,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+    result = _run_once()
+    _log_auto_analysis_subprocess_output(logger=logger, result=result)
+    if result.returncode != 0:
+        raise RuntimeError(f"auto analysis subprocess failed (returncode={result.returncode})")
+
+    summary_path = _parse_summary_path_from_stdout(result.stdout, session_dir=session_dir)
+    if output_plots:
+        expected_plots = _expected_plot_paths(session_dir)
+        generated = [p for p in expected_plots if p.exists()]
+        logger.info("Auto analysis plots generated: %d/%d", len(generated), len(expected_plots))
+        if not generated:
+            logger.warning("No auto analysis plots found, retrying subprocess once")
+            result2 = _run_once()
+            _log_auto_analysis_subprocess_output(logger=logger, result=result2)
+            if result2.returncode != 0:
+                raise RuntimeError(f"auto analysis subprocess retry failed (returncode={result2.returncode})")
+            summary_path = _parse_summary_path_from_stdout(result2.stdout, session_dir=session_dir)
+            generated = [p for p in expected_plots if p.exists()]
+            logger.info("Auto analysis retry plots generated: %d/%d", len(generated), len(expected_plots))
+            if not generated:
+                logger.error(
+                    "Auto analysis completed but no plot files were produced. "
+                    "Please check plot-related ERROR logs above."
+                )
+    return summary_path
+
+
+def _log_auto_analysis_subprocess_output(logger, result: subprocess.CompletedProcess[str]) -> None:
+    if result.stdout:
+        for line in result.stdout.splitlines():
+            line = line.strip()
+            if line:
+                logger.info("Auto analysis subprocess stdout: %s", line)
+    if result.stderr:
+        for line in result.stderr.splitlines():
+            line = line.strip()
+            if line:
+                logger.warning("Auto analysis subprocess stderr: %s", line)
+
+
+def _parse_summary_path_from_stdout(stdout: str, session_dir: Path) -> Path:
+    lines = [line.strip() for line in stdout.splitlines() if line.strip()]
+    for line in reversed(lines):
+        candidate = Path(line)
+        if candidate.suffix.lower() == ".csv":
+            return candidate
+    return _expected_summary_path(session_dir)
 
 
 if __name__ == "__main__":

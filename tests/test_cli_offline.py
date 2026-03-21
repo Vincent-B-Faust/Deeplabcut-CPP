@@ -209,7 +209,7 @@ def test_apply_session_acclimation_settings() -> None:
 
 
 def test_run_auto_analysis_forces_output_plots_from_config(tmp_path, monkeypatch) -> None:
-    config = {"analysis": {"auto_after_run": True, "output_plots": True}}
+    config = {"analysis": {"auto_after_run": True, "output_plots": True, "auto_after_run_subprocess": False}}
     called = {}
 
     def fake_analyze_session(**kwargs):
@@ -224,7 +224,7 @@ def test_run_auto_analysis_forces_output_plots_from_config(tmp_path, monkeypatch
 
 
 def test_run_auto_analysis_retry_when_no_plot_generated(tmp_path, monkeypatch) -> None:
-    config = {"analysis": {"auto_after_run": True, "output_plots": True}}
+    config = {"analysis": {"auto_after_run": True, "output_plots": True, "auto_after_run_subprocess": False}}
     calls = {"count": 0}
 
     def fake_analyze_session(**kwargs):
@@ -238,3 +238,29 @@ def test_run_auto_analysis_retry_when_no_plot_generated(tmp_path, monkeypatch) -
 
     # First run + one retry because no plot file exists.
     assert calls["count"] == 2
+
+
+def test_run_auto_analysis_subprocess_invoked_by_default(tmp_path, monkeypatch) -> None:
+    config = {"analysis": {"auto_after_run": True, "output_plots": True}}
+    summary = tmp_path / "summary.csv"
+    summary.write_text("ok\n", encoding="utf-8")
+    plot = tmp_path / "figure1.png"
+    plot.write_text("ok\n", encoding="utf-8")
+
+    class DummyResult:
+        returncode = 0
+        stdout = str(summary)
+        stderr = ""
+
+    calls = {"count": 0}
+
+    def fake_run(*args, **kwargs):
+        calls["count"] += 1
+        return DummyResult()
+
+    monkeypatch.setattr(cli.subprocess, "run", fake_run)
+    monkeypatch.setattr(cli, "_expected_plot_paths", lambda _session_dir: [plot])
+    logger = cli.setup_logging(tmp_path, file_prefix=None)
+    cli._run_auto_analysis(config=config, no_auto_analyze=False, session_dir=tmp_path, logger=logger)
+
+    assert calls["count"] == 1
