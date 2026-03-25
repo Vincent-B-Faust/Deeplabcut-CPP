@@ -9,7 +9,7 @@ import cv2
 import numpy as np
 import pandas as pd
 
-from cpp_dlc_live.analysis.metrics import compute_speed_series, compute_summary
+from cpp_dlc_live.analysis.metrics import compute_speed_series, compute_summary, normalize_chamber_series
 from cpp_dlc_live.analysis.plots import (
     plot_chamber_time_bars,
     plot_occupancy,
@@ -73,6 +73,9 @@ def analyze_session(
     logger.info("Analyze options: output_plots=%s fixed_fps_hz=%s cm_per_px=%s", output_plots, fixed_fps_hz, cm_per_px)
 
     df = pd.read_csv(log_path)
+    if len(df) > 0:
+        df = df.copy()
+        df["chamber"] = normalize_chamber_series(df.get("chamber"), length=len(df))
     summary = compute_summary(df, cm_per_px=cm_per_px, fixed_fps_hz=fixed_fps_hz)
 
     file_prefix = detect_session_file_prefix(session_dir)

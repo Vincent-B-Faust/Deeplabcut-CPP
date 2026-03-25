@@ -5,6 +5,32 @@ from typing import Any, Dict, Optional
 import numpy as np
 import pandas as pd
 
+_VALID_CHAMBERS = {"chamber1", "chamber2", "neutral"}
+
+
+def normalize_chamber_series(values: object, length: int) -> pd.Series:
+    """Normalize chamber labels for analysis.
+
+    Analysis never keeps an `unknown` state: unknown/empty/invalid labels are
+    treated as `neutral` so occupancy and summary outputs are stable.
+    """
+    if values is None:
+        return pd.Series(["neutral"] * int(length), dtype="object")
+
+    chamber = pd.Series(values).astype(str).str.strip().str.lower()
+    chamber = chamber.replace(
+        {
+            "": "neutral",
+            "unknown": "neutral",
+            "none": "neutral",
+            "nan": "neutral",
+            # tolerate common typo
+            "netural": "neutral",
+        }
+    )
+    chamber = chamber.where(chamber.isin(_VALID_CHAMBERS), "neutral")
+    return chamber
+
 
 def compute_dt_seconds(df: pd.DataFrame, fixed_fps_hz: Optional[float] = None) -> np.ndarray:
     if "t_wall" not in df.columns or df.empty:
@@ -82,7 +108,7 @@ def compute_summary(
         }
 
     dt = compute_dt_seconds(df, fixed_fps_hz=fixed_fps_hz)
-    chamber = df.get("chamber", pd.Series(["unknown"] * len(df))).astype(str).str.lower()
+    chamber = normalize_chamber_series(df.get("chamber"), length=len(df))
 
     time_ch1_s = float(dt[chamber == "chamber1"].sum())
     time_ch2_s = float(dt[chamber == "chamber2"].sum())
