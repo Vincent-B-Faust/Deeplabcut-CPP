@@ -502,16 +502,26 @@ Options:
 - `--cm_per_px 0.05`
 - `--fixed_fps 30`
 - `--fixed_fps_hz 30`
+- `--time_start_s 60` (analyze from elapsed 60s)
+- `--time_end_s 300` (analyze until elapsed 300s)
 - `--no_plots`
 - `--render_overlay_video` (render an offline annotated video from session log + source video)
 - `--overlay_video_source /path/to/raw_or_preview.mp4` (optional source override)
 - `--overlay_video_filename analysis_overlay.mp4` (optional output filename)
+
+Time-range output rule:
+- If `--time_start_s` and/or `--time_end_s` is provided, analysis outputs are written under:
+  - `session_dir/analysis_range_<start>_to_<end>/`
+  - Example: `analysis_range_60s_to_300s`
+- If no time range is provided, outputs are written to the session root (default behavior).
 
 Typical dryrun/offline workflow:
 
 ```bash
 cpp-dlc-live analyze_session \
   --session_dir data/session_20260226_120000 \
+  --time_start_s 60 \
+  --time_end_s 300 \
   --render_overlay_video \
   --no_plots
 ```
@@ -540,6 +550,8 @@ Options:
 - `--cm_per_px 0.05`
 - `--fixed_fps 30`
 - `--fixed_fps_hz 30`
+- `--time_start_s 60`
+- `--time_end_s 300`
 - `--no_plots`
 - `--render_overlay_video`
 - `--overlay_video_filename analysis_overlay.mp4`
@@ -549,6 +561,8 @@ Options:
 
 Output:
 - a report CSV under `root_dir` (default `batch_analysis_report.csv`) with per-session status and generated paths.
+- when time range is specified, each session writes analysis artifacts under its own
+  `analysis_range_<start>_to_<end>/` subfolder.
 
 ## 5) `run_offline` (fast full replay from raw video)
 
@@ -661,6 +675,9 @@ Each session directory includes (depending on command and options):
 - `<session_id>_speed_over_time.png`: Figure 4
 - `<session_id>_occupancy_over_time.png`: Figure 5
 - `<session_id>_issue_summary.csv`, `<session_id>_issue_timeline.csv`, `<session_id>_incident_summary.csv` (from `analyze_issues`)
+
+If `analyze_session` / `analyze_batch` is run with `--time_start_s` / `--time_end_s`, the analysis artifacts above are generated inside:
+- `analysis_range_<start>_to_<end>/` (under each session directory)
 
 ## Core columns in `cpp_realtime_log.csv`
 
