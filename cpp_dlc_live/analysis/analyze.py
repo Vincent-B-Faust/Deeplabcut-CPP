@@ -31,9 +31,12 @@ def analyze_session(
     cm_per_px_override: Optional[float] = None,
     fixed_fps_hz_override: Optional[float] = None,
     output_plots_override: Optional[bool] = None,
+    time_start_s: Optional[float] = None,
+    time_end_s: Optional[float] = None,
     render_overlay_video: bool = False,
     overlay_video_source_override: Optional[Path] = None,
     overlay_video_filename_override: Optional[str] = None,
+    output_dir_override: Optional[Path] = None,
     logger: Optional[logging.Logger] = None,
 ) -> Path:
     logger = logger or logging.getLogger("cpp_dlc_live")
@@ -76,11 +79,27 @@ def analyze_session(
     if len(df) > 0:
         df = df.copy()
         df["chamber"] = normalize_chamber_series(df.get("chamber"), length=len(df))
+
+    df, resolved_start_s, resolved_end_s = _filter_time_range(
+        df=df,
+        fixed_fps_hz=fixed_fps_hz,
+        time_start_s=time_start_s,
+        time_end_s=time_end_s,
+        logger=logger,
+    )
+
+    output_dir = _resolve_analysis_output_dir(
+        session_dir=session_dir,
+        output_dir_override=output_dir_override,
+        time_start_s=resolved_start_s,
+        time_end_s=resolved_end_s,
+    )
+    output_dir.mkdir(parents=True, exist_ok=True)
     summary = compute_summary(df, cm_per_px=cm_per_px, fixed_fps_hz=fixed_fps_hz)
 
     file_prefix = detect_session_file_prefix(session_dir)
     summary_name = ensure_prefixed_filename("summary.csv", file_prefix) if file_prefix else "summary.csv"
-    summary_path = session_dir / summary_name
+    summary_path = output_dir / summary_name
     pd.DataFrame([summary]).to_csv(summary_path, index=False)
     logger.info("Summary written: %s", summary_path)
     if fixed_fps_hz is not None:
@@ -118,11 +137,11 @@ def analyze_session(
         )
 
         plot_targets = [
-            ("figure1", session_dir / fig1_name),
-            ("figure2", session_dir / fig2_name),
-            ("figure3", session_dir / fig3_name),
-            ("speed_over_time", session_dir / speed_name),
-            ("occupancy_over_time", session_dir / occupancy_name),
+            ("figure1", output_dir / fig1_name),
+            ("figure2", output_dir / fig2_name),
+            ("figure3", output_dir / fig3_name),
+            ("speed_over_time", output_dir / speed_name),
+            ("occupancy_over_time", output_dir / occupancy_name),
         ]
         plot_failures: list[str] = []
         plots_written = 0
@@ -165,6 +184,7 @@ def analyze_session(
                 metadata=metadata,
                 source_video_override=overlay_video_source_override,
                 output_filename_override=overlay_video_filename_override,
+                output_dir_override=output_dir,
                 logger=logger,
             )
             logger.info("Overlay video written: %s", overlay_path)
@@ -222,6 +242,7 @@ def render_session_overlay_video(
     metadata: Optional[dict] = None,
     source_video_override: Optional[Path] = None,
     output_filename_override: Optional[str] = None,
+    output_dir_override: Optional[Path] = None,
     logger: Optional[logging.Logger] = None,
 ) -> Path:
     logger = logger or logging.getLogger("cpp_dlc_live")
@@ -265,7 +286,8 @@ def render_session_overlay_video(
         file_prefix = detect_session_file_prefix(session_dir)
         out_name_raw = output_filename_override or "analysis_overlay.mp4"
         out_name = ensure_prefixed_filename(out_name_raw, file_prefix) if file_prefix else out_name_raw
-        out_path = (session_dir / out_name) if not Path(out_name).is_absolute() else Path(out_name)
+        output_dir = Path(output_dir_override) if output_dir_override is not None else session_dir
+        out_path = (output_dir / out_name) if not Path(out_name).is_absolute() else Path(out_name)
         out_path.parent.mkdir(parents=True, exist_ok=True)
 
         writer = _open_overlay_writer(out_path=out_path, width=w, height=h, fps=fps)
@@ -285,12 +307,23 @@ def render_session_overlay_video(
             t0 = _first_time_value(df)
 
             frame_i = 0
+            last_target_frame: Optional[int] = None
             for _, row in df.iterrows():
-                frame = first_frame if frame_i == 0 else None
-                if frame_i > 0:
+                target_frame = _safe_int(row.get("frame_idx"))
+                frame = None
+                if target_frame is None:
+                    frame = first_frame if frame_i == 0 else None
+                    if frame_i > 0:
+                        ok, frame = cap.read()
+                        if not ok or frame is None:
+                            break
+                else:
+                    if last_target_frame is None or target_frame != (last_target_frame + 1):
+                        cap.set(cv2.CAP_PROP_POS_FRAMES, float(target_frame))
                     ok, frame = cap.read()
                     if not ok or frame is None:
                         break
+                    last_target_frame = target_frame
                 frame_i += 1
 
                 vis = frame.copy()
@@ -459,6 +492,100 @@ def _safe_float(value: object, default: float = float("nan")) -> float:
         return float(value)
     except Exception:
         return default
+
+
+def _safe_int(value: object) -> Optional[int]:
+    try:
+        if value is None:
+            return None
+        v = float(value)
+        if not np.isfinite(v):
+            return None
+        if v < 0:
+            return None
+        return int(round(v))
+    except Exception:
+        return None
+
+
+def _filter_time_range(
+    df: pd.DataFrame,
+    fixed_fps_hz: Optional[float],
+    time_start_s: Optional[float],
+    time_end_s: Optional[float],
+    logger: logging.Logger,
+) -> Tuple[pd.DataFrame, Optional[float], Optional[float]]:
+    if time_start_s is None and time_end_s is None:
+        return df, None, None
+
+    start_s = float(time_start_s) if time_start_s is not None else 0.0
+    end_s = float(time_end_s) if time_end_s is not None else None
+    if start_s < 0:
+        raise ValueError("time_start_s must be >= 0")
+    if end_s is not None and end_s <= start_s:
+        raise ValueError("time_end_s must be > time_start_s")
+
+    elapsed = _elapsed_series(df=df, fixed_fps_hz=fixed_fps_hz)
+    mask = elapsed >= start_s
+    if end_s is not None:
+        mask &= elapsed <= end_s
+    filtered = df.loc[mask].copy()
+    if filtered.empty:
+        raise ValueError(
+            f"No samples in requested time range: start={start_s:.3f}s end={('end' if end_s is None else f'{end_s:.3f}s')}"
+        )
+    logger.info(
+        "Applied analysis time range: start=%.3fs end=%s kept=%d/%d",
+        start_s,
+        ("end" if end_s is None else f"{end_s:.3f}s"),
+        len(filtered),
+        len(df),
+    )
+    return filtered, start_s, end_s
+
+
+def _elapsed_series(df: pd.DataFrame, fixed_fps_hz: Optional[float]) -> pd.Series:
+    if len(df) == 0:
+        return pd.Series([], dtype="float64")
+
+    t = pd.to_numeric(df.get("t_wall"), errors="coerce")
+    if t.notna().any():
+        t0 = float(t.dropna().iloc[0])
+        return (t - t0).astype(float)
+
+    if fixed_fps_hz is not None and fixed_fps_hz > 0:
+        frame_idx = pd.to_numeric(df.get("frame_idx"), errors="coerce")
+        if frame_idx.notna().any():
+            f0 = float(frame_idx.dropna().iloc[0])
+            return ((frame_idx - f0) / float(fixed_fps_hz)).astype(float)
+
+    return pd.Series(np.arange(len(df), dtype=float), index=df.index)
+
+
+def _resolve_analysis_output_dir(
+    session_dir: Path,
+    output_dir_override: Optional[Path],
+    time_start_s: Optional[float],
+    time_end_s: Optional[float],
+) -> Path:
+    if output_dir_override is not None:
+        return Path(output_dir_override)
+    if time_start_s is None and time_end_s is None:
+        return session_dir
+    suffix = _format_time_range_suffix(time_start_s, time_end_s)
+    return session_dir / f"analysis_range_{suffix}"
+
+
+def _format_time_range_suffix(start_s: Optional[float], end_s: Optional[float]) -> str:
+    def _fmt(v: Optional[float]) -> str:
+        if v is None:
+            return "end"
+        fv = float(v)
+        if fv.is_integer():
+            return f"{int(fv)}s"
+        return f"{fv:.3f}".rstrip("0").rstrip(".").replace(".", "p") + "s"
+
+    return f"{_fmt(start_s)}_to_{_fmt(end_s)}"
 
 
 def _resolve_laser_mode_overlay_text(config: dict, metadata: dict) -> str:

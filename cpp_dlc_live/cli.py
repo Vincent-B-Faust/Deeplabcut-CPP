@@ -115,6 +115,8 @@ def _build_parser() -> argparse.ArgumentParser:
     p_an.add_argument("--cm_per_px", type=float, default=None, help="Override cm_per_px")
     p_an.add_argument("--fixed_fps", type=float, default=None, help="Use global fixed FPS timebase for metrics")
     p_an.add_argument("--fixed_fps_hz", type=float, default=None, help="Use fixed FPS timebase for metrics")
+    p_an.add_argument("--time_start_s", type=float, default=None, help="Analyze from this elapsed time (seconds)")
+    p_an.add_argument("--time_end_s", type=float, default=None, help="Analyze until this elapsed time (seconds)")
     p_an.add_argument("--no_plots", action="store_true", help="Disable plot output")
     p_an.add_argument(
         "--render_overlay_video",
@@ -146,6 +148,8 @@ def _build_parser() -> argparse.ArgumentParser:
     p_batch.add_argument("--cm_per_px", type=float, default=None, help="Override cm_per_px for all sessions")
     p_batch.add_argument("--fixed_fps", type=float, default=None, help="Use fixed FPS timebase for all sessions")
     p_batch.add_argument("--fixed_fps_hz", type=float, default=None, help="Legacy fixed FPS option")
+    p_batch.add_argument("--time_start_s", type=float, default=None, help="Analyze from this elapsed time (seconds)")
+    p_batch.add_argument("--time_end_s", type=float, default=None, help="Analyze until this elapsed time (seconds)")
     p_batch.add_argument("--no_plots", action="store_true", help="Disable plot generation for all sessions")
     p_batch.add_argument(
         "--render_overlay_video",
@@ -365,6 +369,8 @@ def _cmd_analyze_session(args: argparse.Namespace) -> None:
         # Keep backward compatibility with --fixed_fps_hz while preferring the new unified --fixed_fps.
         fixed_fps_hz_override=(args.fixed_fps if args.fixed_fps is not None else args.fixed_fps_hz),
         output_plots_override=(False if args.no_plots else None),
+        time_start_s=getattr(args, "time_start_s", None),
+        time_end_s=getattr(args, "time_end_s", None),
         render_overlay_video=bool(args.render_overlay_video),
         overlay_video_source_override=(Path(args.overlay_video_source) if args.overlay_video_source else None),
         overlay_video_filename_override=args.overlay_video_filename,
@@ -454,6 +460,8 @@ def _cmd_analyze_batch(args: argparse.Namespace) -> None:
                 cm_per_px_override=args.cm_per_px,
                 fixed_fps_hz_override=(args.fixed_fps if args.fixed_fps is not None else args.fixed_fps_hz),
                 output_plots_override=(False if args.no_plots else None),
+                time_start_s=getattr(args, "time_start_s", None),
+                time_end_s=getattr(args, "time_end_s", None),
                 render_overlay_video=bool(getattr(args, "render_overlay_video", False)),
                 overlay_video_source_override=None,
                 overlay_video_filename_override=getattr(args, "overlay_video_filename", None),

@@ -56,3 +56,31 @@ def test_spatial_limits_prioritize_roi_over_frame_shape() -> None:
         roi_cfg=roi_cfg,
     )
     assert (x_min, x_max, y_min, y_max) == (100.0, 520.0, 100.0, 400.0)
+
+
+def test_analyze_session_time_range_outputs_to_subdir(tmp_path) -> None:
+    prefix = "session_20260317_120000_M001_Control_600s"
+    df = pd.DataFrame(
+        {
+            "t_wall": [float(i) for i in range(10)],
+            "frame_idx": list(range(10)),
+            "x": [10.0 + i for i in range(10)],
+            "y": [20.0 + i for i in range(10)],
+            "chamber": ["chamber1"] * 10,
+            "laser_state": [1] * 10,
+        }
+    )
+    (tmp_path / f"{prefix}_cpp_realtime_log.csv").write_text(df.to_csv(index=False), encoding="utf-8")
+    (tmp_path / f"{prefix}_config_used.yaml").write_text("analysis:\n  output_plots: true\n", encoding="utf-8")
+    (tmp_path / f"{prefix}_metadata.json").write_text(json.dumps({"file_prefix": prefix}), encoding="utf-8")
+
+    summary_path = analyze_session(
+        session_dir=tmp_path,
+        output_plots_override=True,
+        time_start_s=2.0,
+        time_end_s=5.0,
+    )
+
+    assert summary_path.parent.name == "analysis_range_2s_to_5s"
+    assert summary_path.exists()
+    assert (summary_path.parent / f"{prefix}_occupancy_over_time.png").exists()

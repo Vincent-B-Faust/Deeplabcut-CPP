@@ -18,7 +18,7 @@ try:
 except Exception:  # pragma: no cover - optional runtime fallback
     gaussian_filter = None  # type: ignore[assignment]
 
-from cpp_dlc_live.analysis.metrics import compute_dt_seconds, normalize_chamber_series
+from cpp_dlc_live.analysis.metrics import compute_dt_seconds, normalize_chamber_series, state_stats_dt
 
 FrameShape = Optional[Tuple[int, int]]
 
@@ -160,7 +160,7 @@ def plot_position_heatmap(
 
 def plot_chamber_time_bars(df: pd.DataFrame, out_path: Path, fixed_fps_hz: Optional[float] = None) -> None:
     """Figure 3: chamber1/chamber2 dwell durations and percentages."""
-    dt = compute_dt_seconds(df, fixed_fps_hz=fixed_fps_hz)
+    dt = state_stats_dt(compute_dt_seconds(df, fixed_fps_hz=fixed_fps_hz))
     chamber = normalize_chamber_series(df.get("chamber"), length=len(df)).to_numpy(dtype=str)
 
     labels = ["chamber1", "chamber2"]
@@ -207,6 +207,11 @@ def plot_occupancy(df: pd.DataFrame, out_path: Path) -> None:
     t = pd.to_numeric(df.get("t_wall"), errors="coerce")
     t = t - float(np.nanmin(t)) if len(t) else t
     chamber = normalize_chamber_series(df.get("chamber"), length=len(df))
+
+    # First frame is excluded from state statistics; keep figure consistent.
+    if len(chamber) > 1:
+        t = t.iloc[1:]
+        chamber = chamber.iloc[1:]
 
     mapping = {"neutral": 0, "chamber1": 1, "chamber2": 2}
     y = chamber.map(mapping).fillna(0)

@@ -60,6 +60,18 @@ def compute_dt_seconds(df: pd.DataFrame, fixed_fps_hz: Optional[float] = None) -
     return dt
 
 
+def state_stats_dt(dt: np.ndarray) -> np.ndarray:
+    """Return dt used by state-based stats.
+
+    The first frame's state can be unstable right after runtime startup, so it
+    is excluded from state-related statistics by setting its dt weight to 0.
+    """
+    out = np.array(dt, dtype=float, copy=True)
+    if out.size > 0:
+        out[0] = 0.0
+    return out
+
+
 def compute_speed_series(df: pd.DataFrame, fixed_fps_hz: Optional[float] = None) -> pd.DataFrame:
     n = len(df)
     if n == 0:
@@ -109,10 +121,11 @@ def compute_summary(
 
     dt = compute_dt_seconds(df, fixed_fps_hz=fixed_fps_hz)
     chamber = normalize_chamber_series(df.get("chamber"), length=len(df))
+    dt_state = state_stats_dt(dt)
 
-    time_ch1_s = float(dt[chamber == "chamber1"].sum())
-    time_ch2_s = float(dt[chamber == "chamber2"].sum())
-    time_neutral_s = float(dt[chamber == "neutral"].sum())
+    time_ch1_s = float(dt_state[chamber == "chamber1"].sum())
+    time_ch2_s = float(dt_state[chamber == "chamber2"].sum())
+    time_neutral_s = float(dt_state[chamber == "neutral"].sum())
 
     x = pd.to_numeric(df.get("x"), errors="coerce").to_numpy(dtype=float)
     y = pd.to_numeric(df.get("y"), errors="coerce").to_numpy(dtype=float)
@@ -129,7 +142,7 @@ def compute_summary(
     mean_speed_px_s = distance_px / session_duration_s if session_duration_s > 0 else 0.0
 
     laser = pd.to_numeric(df.get("laser_state", 0), errors="coerce").fillna(0).to_numpy(dtype=float)
-    laser_on_time_s = float(dt[laser > 0.5].sum())
+    laser_on_time_s = float(dt_state[laser > 0.5].sum())
 
     distance_cm = np.nan
     mean_speed_cm_s = np.nan
