@@ -49,7 +49,7 @@ Runtime loop:
 2. Infer pose with DLC-live.
 3. Determine chamber (`chamber1/chamber2/neutral/unknown`) from ROI.
 4. Stabilize chamber state with debounce.
-5. Control laser output (`ON` in chamber1, `OFF` otherwise by default).
+5. Control laser output (`ON` in configured chambers, `OFF` otherwise by default).
 6. Save frame-level logs and metadata.
 7. Optionally preview and record annotated overlay video.
 
@@ -68,8 +68,8 @@ After runtime:
   - confidence threshold + hold-last-valid logic
   - OpenCV overlay preview (including runtime timer `HH:MM:SS.mmm`)
 - Laser control modes:
-  - `continuous`: level output (ON while mouse is in chamber1, OFF otherwise)
-  - `pulse`: pulse output in chamber1 (frequency configurable)
+  - `continuous`: level output (ON while mouse is in configured ON chambers, OFF otherwise)
+  - `pulse`: pulse output in configured ON chambers (frequency configurable)
     - `pulse_mode=gated`: continuous counter pulse + digital enable line
     - `pulse_mode=startstop`: on-demand counter start/stop with min on/off dwell
   - `dryrun`: no hardware output, full logic path enabled
@@ -325,11 +325,12 @@ Note: always replace any machine-specific paths with your own absolute paths.
 ### `laser_control`
 - `laser_control.enabled`
 - `laser_control.mode`: `continuous` | `pulse` | `gated` | `startstop` | `dryrun`
+- `laser_control.on_chambers`: list or comma-separated string of ON regions, e.g. `["chamber1"]`, `["chamber2"]`, `["chamber1","chamber2"]`, `["neutral"]` (default: `["chamber1"]`)
 - `continuous`:
-  - steady level output (ON in `chamber1`, OFF otherwise)
+  - steady level output (ON in selected `on_chambers`, OFF otherwise)
   - requires `laser_control.continuous_line` (or `enable_line` fallback)
 - `pulse`:
-  - user-facing pulse alias
+  - user-facing pulse alias (pulse train enabled when current chamber is in `on_chambers`)
   - `laser_control.pulse_mode`: `gated` (default) | `startstop`
 - `laser_control.freq_hz`, `laser_control.duty_cycle`
 - `laser_control.ctr_channel`, `laser_control.pulse_term`, `laser_control.enable_line`
@@ -422,6 +423,7 @@ roi:
 laser_control:
   enabled: true
   mode: dryrun
+  on_chambers: [chamber1]
   freq_hz: 20.0
   duty_cycle: 0.05
   ctr_channel: cDAQ1Mod4/ctr0
@@ -485,8 +487,10 @@ Common options:
 Notes:
 - `preview_recording.enabled=true` can still record video even when `--no_preview` is used.
 - Set both `preview_recording.enabled=true` and `raw_recording.enabled=true` to save both overlay and raw videos simultaneously.
+- Pre-run popup now includes `laser ON region` selection and writes it into `session_info.laser_on_chambers` and `laser_control.on_chambers`.
 - On input video EOF, run exits normally.
 - Session folder name is expanded to include `timestamp + mouse_id + group + duration + laser_mode` (pulse also includes frequency in suffix).
+- Session folder/file prefix also includes selected laser ON chamber region suffix (for example `onCh1`, `onCh2`, `onCh1Ch2`).
 - Optional acclimation runs before experiment timer starts.
 - Output files are prefixed with resolved session id.
 - By default, analysis is auto-run after each successful realtime session and writes Figure1–Figure5 plus summary.

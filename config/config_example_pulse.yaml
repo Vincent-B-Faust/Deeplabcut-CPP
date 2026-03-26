@@ -68,8 +68,11 @@ roi:
 # =========================
 laser_control:
   enabled: true
-  # Pulse mode: ON in chamber1, OFF otherwise.
+  # Pulse mode: ON in selected chambers, OFF otherwise.
   mode: pulse
+  # Choose which chamber(s) turn laser ON.
+  # Valid values: chamber1, chamber2, neutral
+  on_chambers: [chamber1]
   # Use startstop implementation to match your current setup.
   pulse_mode: startstop
   # Pulse waveform parameters.

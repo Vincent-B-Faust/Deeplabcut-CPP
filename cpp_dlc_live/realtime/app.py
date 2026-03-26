@@ -6,7 +6,7 @@ import time
 import traceback
 from collections import deque
 from pathlib import Path
-from typing import Any, Deque, Dict, Optional, Tuple, Union
+from typing import Any, Deque, Dict, Optional, Set, Tuple, Union
 
 import cv2
 import numpy as np
@@ -21,6 +21,16 @@ from cpp_dlc_live.realtime.recorder import CSVRecorder
 from cpp_dlc_live.realtime.roi import ChamberROI
 from cpp_dlc_live.utils.io_utils import ensure_prefixed_filename, file_sha256, save_json
 from cpp_dlc_live.utils.time_utils import utc_now_iso
+
+_VALID_LASER_ON_CHAMBERS = {"chamber1", "chamber2", "neutral"}
+_LASER_ON_CHAMBER_ALIASES = {
+    "ch1": "chamber1",
+    "1": "chamber1",
+    "ch2": "chamber2",
+    "2": "chamber2",
+    "center": "neutral",
+    "centre": "neutral",
+}
 
 
 class RealtimeApp:
@@ -244,7 +254,9 @@ class RealtimeApp:
                 flush_every=200,
             )
 
-            laser_cfg = self.config.get("laser_control", {})
+            laser_cfg_raw = self.config.get("laser_control", {})
+            laser_cfg = dict(laser_cfg_raw) if isinstance(laser_cfg_raw, dict) else {}
+            laser_on_chambers = self._resolve_laser_on_chambers(laser_cfg)
             controller = self._create_and_start_controller(laser_cfg)
             previous_laser_state = 1 if controller.current_state else 0
             laser_mode_overlay = _format_laser_mode_overlay(laser_cfg if isinstance(laser_cfg, dict) else {})
@@ -256,6 +268,7 @@ class RealtimeApp:
                 dlc_model=runtime.model_info(),
                 laser_mode=laser_cfg.get("mode", "dryrun"),
                 fallback_to_dryrun=laser_cfg.get("fallback_to_dryrun", True),
+                laser_on_chambers=sorted(laser_on_chambers),
                 debounce_frames=self.config.get("roi", {}).get("debounce_frames", 8),
                 preview_recording_requested=preview_record_requested,
                 raw_recording_requested=raw_record_requested,
@@ -266,6 +279,7 @@ class RealtimeApp:
                     "camera": camera_info,
                     "dlc_model": runtime.model_info(),
                     "daq": dict(laser_cfg),
+                    "laser_on_chambers_resolved": sorted(laser_on_chambers),
                     "roi": roi.to_dict(),
                     "analysis": self.config.get("analysis", {}),
                 }
@@ -404,7 +418,11 @@ class RealtimeApp:
                 if chamber in {"chamber1", "chamber2"}:
                     last_non_neutral = chamber
 
-                desired_laser_on = self._resolve_laser_target(chamber, last_non_neutral)
+                desired_laser_on = self._resolve_laser_target(
+                    chamber,
+                    last_non_neutral,
+                    on_chambers=laser_on_chambers,
+                )
                 controller.set_state(desired_laser_on)
                 laser_state = 1 if controller.current_state else 0
                 if laser_state != previous_laser_state:
@@ -894,30 +912,75 @@ class RealtimeApp:
                 return dry
             raise
 
-    def _resolve_laser_target(self, chamber: str, last_non_neutral: str) -> bool:
+    def _resolve_laser_on_chambers(self, laser_cfg: Dict[str, Any]) -> Set[str]:
+        raw = laser_cfg.get("on_chambers", None)
+        if raw is None:
+            return {"chamber1"}
+
+        tokens: list[str]
+        if isinstance(raw, str):
+            cleaned = raw.replace("|", ",").replace(";", ",")
+            tokens = [token.strip() for token in cleaned.split(",") if token.strip()]
+        elif isinstance(raw, (list, tuple, set)):
+            tokens = [str(token).strip() for token in raw if str(token).strip()]
+        else:
+            self.logger.warning(
+                "laser_control.on_chambers should be a string or list, got %s; fallback to ['chamber1']",
+                type(raw).__name__,
+            )
+            return {"chamber1"}
+
+        resolved: Set[str] = set()
+        invalid_tokens: list[str] = []
+        for token in tokens:
+            token_norm = token.lower().strip()
+            if token_norm in {"all", "*"}:
+                return set(_VALID_LASER_ON_CHAMBERS)
+            chamber_name = _LASER_ON_CHAMBER_ALIASES.get(token_norm, token_norm)
+            if chamber_name in _VALID_LASER_ON_CHAMBERS:
+                resolved.add(chamber_name)
+            else:
+                invalid_tokens.append(token)
+
+        if invalid_tokens:
+            self.logger.warning(
+                "Ignoring unknown laser on_chambers entries: %s (valid: %s)",
+                invalid_tokens,
+                sorted(_VALID_LASER_ON_CHAMBERS),
+            )
+
+        if not resolved:
+            self.logger.warning("laser_control.on_chambers resolved empty; fallback to ['chamber1']")
+            return {"chamber1"}
+        return resolved
+
+    def _resolve_laser_target(self, chamber: str, last_non_neutral: str, on_chambers: Optional[Set[str]] = None) -> bool:
         laser_cfg = self.config.get("laser_control", {})
+        if not isinstance(laser_cfg, dict):
+            laser_cfg = {}
         if not bool(laser_cfg.get("enabled", True)):
             return False
 
-        if chamber == "chamber1":
-            return True
-        if chamber == "chamber2":
-            return False
+        resolved_on_chambers = on_chambers if on_chambers is not None else self._resolve_laser_on_chambers(laser_cfg)
+        if chamber in {"chamber1", "chamber2"}:
+            return chamber in resolved_on_chambers
 
         if chamber == "neutral":
             strategy = str(self.config.get("roi", {}).get("strategy_on_neutral", "off")).lower().strip()
             if strategy == "hold_last":
-                return last_non_neutral == "chamber1"
+                if last_non_neutral in {"chamber1", "chamber2"}:
+                    return last_non_neutral in resolved_on_chambers
+                return self._resolve_unknown_policy(last_non_neutral, resolved_on_chambers)
             if strategy == "unknown":
-                return self._resolve_unknown_policy(last_non_neutral)
-            return False
+                return self._resolve_unknown_policy(last_non_neutral, resolved_on_chambers)
+            return "neutral" in resolved_on_chambers
 
-        return self._resolve_unknown_policy(last_non_neutral)
+        return self._resolve_unknown_policy(last_non_neutral, resolved_on_chambers)
 
-    def _resolve_unknown_policy(self, last_non_neutral: str) -> bool:
+    def _resolve_unknown_policy(self, last_non_neutral: str, on_chambers: Set[str]) -> bool:
         unknown_policy = str(self.config.get("laser_control", {}).get("unknown_policy", "off")).lower().strip()
         if unknown_policy == "hold_last":
-            return last_non_neutral == "chamber1"
+            return last_non_neutral in on_chambers
         return False
 
     def _map_neutral_candidate(self, chamber_raw: str, last_non_neutral: str) -> str:

@@ -8,6 +8,7 @@ from typing import Any, Dict, Optional, Union
 
 import yaml
 
+from cpp_dlc_live.utils.session_prompt import normalize_laser_on_chambers
 from cpp_dlc_live.utils.time_utils import make_session_id
 
 PathLike = Union[str, Path]
@@ -83,8 +84,9 @@ def build_session_suffix(session_info: Dict[str, Any]) -> str:
         session_info.get("laser_mode"),
         session_info.get("pulse_freq_hz"),
     )
+    laser_on_region = _format_laser_on_regions_for_name(session_info.get("laser_on_chambers"))
 
-    parts = [p for p in [mouse_id, group, duration, laser_mode] if p]
+    parts = [p for p in [mouse_id, group, duration, laser_mode, laser_on_region] if p]
     return "_".join(parts)
 
 
@@ -137,6 +139,25 @@ def _format_laser_mode_for_name(mode: Any, pulse_freq_hz: Any) -> str:
         return f"pulse{text}Hz"
 
     return sanitize_name_component(raw)
+
+
+def _format_laser_on_regions_for_name(value: Any) -> str:
+    if value is None:
+        return ""
+    try:
+        chambers = normalize_laser_on_chambers(value)
+    except Exception:
+        return ""
+    if not chambers:
+        return ""
+    if chambers == ["chamber1", "chamber2", "neutral"]:
+        return "onAll"
+    label_map = {
+        "chamber1": "Ch1",
+        "chamber2": "Ch2",
+        "neutral": "Neutral",
+    }
+    return "on" + "".join(label_map.get(ch, sanitize_name_component(ch)) for ch in chambers)
 
 
 def detect_session_file_prefix(session_dir: PathLike) -> Optional[str]:

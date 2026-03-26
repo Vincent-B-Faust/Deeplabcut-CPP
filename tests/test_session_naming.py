@@ -33,6 +33,19 @@ def test_build_session_suffix_includes_laser_mode_and_freq_when_present() -> Non
     assert suffix == "M001_pre_1200s_pulse20Hz"
 
 
+def test_build_session_suffix_includes_laser_on_chambers_when_present() -> None:
+    suffix = build_session_suffix(
+        {
+            "mouse_id": "M001",
+            "group": "pre",
+            "experiment_duration_s": 1200,
+            "laser_mode": "continuous",
+            "laser_on_chambers": ["chamber2"],
+        }
+    )
+    assert suffix == "M001_pre_1200s_continuous_onCh2"
+
+
 def test_ensure_prefixed_filename_preserves_subdir_and_no_double_prefix() -> None:
     out = ensure_prefixed_filename("videos/preview_overlay.mp4", "session_20260317")
     assert out == "videos/session_20260317_preview_overlay.mp4"

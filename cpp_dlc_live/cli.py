@@ -25,7 +25,7 @@ from cpp_dlc_live.utils.io_utils import (
     save_yaml,
     sanitize_name_component,
 )
-from cpp_dlc_live.utils.session_prompt import collect_session_info
+from cpp_dlc_live.utils.session_prompt import collect_session_info, normalize_laser_on_chambers
 
 
 def main(argv: Optional[list[str]] = None) -> None:
@@ -690,7 +690,9 @@ def _resolve_session_info(config: Dict[str, Any], args: argparse.Namespace) -> D
     default_group = str(args.group if args.group is not None else existing.get("group", "")).strip()
     default_laser_mode = str(existing.get("laser_mode", "")).strip() or str(laser_cfg.get("mode", "pulse")).strip()
     default_pulse_freq = existing.get("pulse_freq_hz", laser_cfg.get("freq_hz"))
+    default_laser_on_chambers_raw = existing.get("laser_on_chambers", laser_cfg.get("on_chambers", ["chamber1"]))
     pulse_freq_seed = _optional_float(default_pulse_freq)
+    default_laser_on_chambers = normalize_laser_on_chambers(default_laser_on_chambers_raw)
     default_acclimation_enabled_raw = existing.get("acclimation_enabled", acclimation_cfg.get("enabled", False))
     default_acclimation_enabled = _to_bool(default_acclimation_enabled_raw, default=False)
     default_acclimation_duration = existing.get("acclimation_duration_s", acclimation_cfg.get("duration_s"))
@@ -716,6 +718,7 @@ def _resolve_session_info(config: Dict[str, Any], args: argparse.Namespace) -> D
         pulse_freq_hz = (pulse_freq_seed if pulse_freq_seed is not None else 20.0) if laser_mode == "pulse" else None
         if laser_mode == "pulse" and (pulse_freq_hz is None or pulse_freq_hz <= 0):
             raise ValueError("laser pulse_freq_hz must be > 0 when laser_mode=pulse")
+        laser_on_chambers = normalize_laser_on_chambers(default_laser_on_chambers)
         acclimation_enabled = default_acclimation_enabled
         acclimation_duration_s = 0.0
         if acclimation_enabled:
@@ -728,6 +731,7 @@ def _resolve_session_info(config: Dict[str, Any], args: argparse.Namespace) -> D
             "experiment_duration_s": duration_s,
             "laser_mode": laser_mode,
             "pulse_freq_hz": pulse_freq_hz,
+            "laser_on_chambers": laser_on_chambers,
             "acclimation_enabled": acclimation_enabled,
             "acclimation_duration_s": acclimation_duration_s,
         }
@@ -738,6 +742,7 @@ def _resolve_session_info(config: Dict[str, Any], args: argparse.Namespace) -> D
         default_duration_s=(float(duration_seed) if duration_seed is not None else None),
         default_laser_mode=_normalize_user_laser_mode(default_laser_mode),
         default_pulse_freq_hz=pulse_freq_seed,
+        default_laser_on_chambers=default_laser_on_chambers,
         default_acclimation_enabled=default_acclimation_enabled,
         default_acclimation_duration_s=acclimation_duration_seed,
     )
@@ -748,6 +753,7 @@ def _resolve_session_info(config: Dict[str, Any], args: argparse.Namespace) -> D
     info["experiment_duration_s"] = float(info.get("experiment_duration_s"))
     info["laser_mode"] = _normalize_user_laser_mode(info.get("laser_mode", default_laser_mode))
     info["pulse_freq_hz"] = _optional_float(info.get("pulse_freq_hz"))
+    info["laser_on_chambers"] = normalize_laser_on_chambers(info.get("laser_on_chambers", default_laser_on_chambers))
     if info["laser_mode"] == "pulse":
         if info["pulse_freq_hz"] is None or info["pulse_freq_hz"] <= 0:
             raise ValueError("laser pulse_freq_hz must be > 0 when laser_mode=pulse")
@@ -810,6 +816,8 @@ def _apply_session_laser_settings(config: Dict[str, Any], session_info: Dict[str
 
     normalized = _normalize_user_laser_mode(laser_mode)
     current_mode_raw = str(laser_cfg.get("mode", "dryrun")).strip().lower()
+    if "laser_on_chambers" in session_info:
+        laser_cfg["on_chambers"] = normalize_laser_on_chambers(session_info.get("laser_on_chambers"))
 
     if normalized == "continuous":
         laser_cfg["mode"] = "continuous"

@@ -68,8 +68,11 @@ roi:
 # =========================
 laser_control:
   enabled: true
-  # Continuous mode: ON in chamber1, OFF otherwise.
+  # Continuous mode: ON in selected chambers, OFF otherwise.
   mode: continuous
+  # Choose which chamber(s) turn laser ON.
+  # Valid values: chamber1, chamber2, neutral
+  on_chambers: [chamber1]
   # DO line used for steady high/low level output.
   continuous_line: cDAQ1Mod4/port0/line0
   # Unknown/neutral handling policy (with strategy_on_neutral=off this is usually OFF).

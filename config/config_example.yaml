@@ -10,6 +10,7 @@ session_info:
   experiment_duration_s: 600
   # Set by pre-run popup:
   laser_mode: "pulse"
+  laser_on_chambers: [chamber1]
   pulse_freq_hz: 20.0
   acclimation_enabled: false
   acclimation_duration_s: 0
@@ -98,6 +99,9 @@ laser_control:
   enabled: true
   # dryrun | continuous | pulse | gated | startstop
   mode: dryrun
+  # Which chamber states should trigger laser ON.
+  # Supports: chamber1, chamber2, neutral (aliases: ch1/ch2). Default is [chamber1].
+  on_chambers: [chamber1]
   # For mode=continuous (steady ON/OFF), output line:
   continuous_line: cDAQ1Mod4/port0/line0
   # For mode=pulse alias, choose implementation: gated | startstop
