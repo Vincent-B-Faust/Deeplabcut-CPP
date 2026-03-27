@@ -30,6 +30,12 @@ _LASER_ON_CHAMBER_ALIASES = {
     "2": "chamber2",
     "center": "neutral",
     "centre": "neutral",
+    "none": "none",
+    "off": "none",
+    "disabled": "none",
+    "disable": "none",
+    "no": "none",
+    "0": "none",
 }
 
 
@@ -923,6 +929,9 @@ class RealtimeApp:
             tokens = [token.strip() for token in cleaned.split(",") if token.strip()]
         elif isinstance(raw, (list, tuple, set)):
             tokens = [str(token).strip() for token in raw if str(token).strip()]
+            if not tokens:
+                # Explicit empty list means "none": no chamber can turn laser ON.
+                return set()
         else:
             self.logger.warning(
                 "laser_control.on_chambers should be a string or list, got %s; fallback to ['chamber1']",
@@ -932,11 +941,15 @@ class RealtimeApp:
 
         resolved: Set[str] = set()
         invalid_tokens: list[str] = []
+        saw_none = False
         for token in tokens:
             token_norm = token.lower().strip()
             if token_norm in {"all", "*"}:
                 return set(_VALID_LASER_ON_CHAMBERS)
             chamber_name = _LASER_ON_CHAMBER_ALIASES.get(token_norm, token_norm)
+            if chamber_name == "none":
+                saw_none = True
+                continue
             if chamber_name in _VALID_LASER_ON_CHAMBERS:
                 resolved.add(chamber_name)
             else:
@@ -948,6 +961,11 @@ class RealtimeApp:
                 invalid_tokens,
                 sorted(_VALID_LASER_ON_CHAMBERS),
             )
+
+        if saw_none and not resolved:
+            return set()
+        if saw_none and resolved:
+            self.logger.warning("laser_control.on_chambers contains both none and chamber names, ignoring none")
 
         if not resolved:
             self.logger.warning("laser_control.on_chambers resolved empty; fallback to ['chamber1']")

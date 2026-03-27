@@ -71,7 +71,7 @@ laser_control:
   # Continuous mode: ON in selected chambers, OFF otherwise.
   mode: continuous
   # Choose which chamber(s) turn laser ON.
-  # Valid values: chamber1, chamber2, neutral
+  # Valid values: chamber1, chamber2, neutral, none
   on_chambers: [chamber1]
   # DO line used for steady high/low level output.
   continuous_line: cDAQ1Mod4/port0/line0

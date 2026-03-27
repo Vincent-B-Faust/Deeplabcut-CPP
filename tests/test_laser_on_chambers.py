@@ -58,3 +58,12 @@ def test_laser_on_chambers_invalid_input_falls_back_to_chamber1() -> None:
     app = _build_app({"enabled": True})
     on_chambers = app._resolve_laser_on_chambers({"on_chambers": ["bad_region"]})
     assert on_chambers == {"chamber1"}
+
+
+def test_laser_on_chambers_none_disables_all_chamber_triggers() -> None:
+    app = _build_app({"enabled": True})
+    on_chambers = app._resolve_laser_on_chambers({"on_chambers": "none"})
+    assert on_chambers == set()
+    assert not app._resolve_laser_target("chamber1", "unknown", on_chambers=on_chambers)
+    assert not app._resolve_laser_target("chamber2", "unknown", on_chambers=on_chambers)
+    assert not app._resolve_laser_target("neutral", "chamber1", on_chambers=on_chambers)

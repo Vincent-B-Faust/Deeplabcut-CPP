@@ -325,7 +325,7 @@ Note: always replace any machine-specific paths with your own absolute paths.
 ### `laser_control`
 - `laser_control.enabled`
 - `laser_control.mode`: `continuous` | `pulse` | `gated` | `startstop` | `dryrun`
-- `laser_control.on_chambers`: list or comma-separated string of ON regions, e.g. `["chamber1"]`, `["chamber2"]`, `["chamber1","chamber2"]`, `["neutral"]` (default: `["chamber1"]`)
+- `laser_control.on_chambers`: list or comma-separated string of ON regions, e.g. `["chamber1"]`, `["chamber2"]`, `["chamber1","chamber2"]`, `["neutral"]`, `["none"]` (default: `["chamber1"]`)
 - `continuous`:
   - steady level output (ON in selected `on_chambers`, OFF otherwise)
   - requires `laser_control.continuous_line` (or `enable_line` fallback)
@@ -491,6 +491,7 @@ Notes:
 - On input video EOF, run exits normally.
 - Session folder name is expanded to include `timestamp + mouse_id + group + duration + laser_mode` (pulse also includes frequency in suffix).
 - Session folder/file prefix also includes selected laser ON chamber region suffix (for example `onCh1`, `onCh2`, `onCh1Ch2`).
+  - If `on_chambers=none`, suffix becomes `onNone`.
 - Optional acclimation runs before experiment timer starts.
 - Output files are prefixed with resolved session id.
 - By default, analysis is auto-run after each successful realtime session and writes Figure1–Figure5 plus summary.

@@ -14,6 +14,12 @@ _LASER_ON_CHAMBER_ALIASES = {
     "centre": "neutral",
     "middle": "neutral",
     "n": "neutral",
+    "none": "none",
+    "off": "none",
+    "disabled": "none",
+    "disable": "none",
+    "no": "none",
+    "0": "none",
 }
 
 
@@ -164,7 +170,7 @@ def _prompt_with_tk(
     laser_on_chambers_values = _merge_history(laser_on_chambers_default, laser_on_chambers_history)
     laser_on_chambers_values = _ensure_choices(
         values=laser_on_chambers_values,
-        required=["chamber1", "chamber2", "neutral", "chamber1,chamber2", "all"],
+        required=["chamber1", "chamber2", "neutral", "chamber1,chamber2", "all", "none"],
         preferred=laser_on_chambers_default,
     )
     pulse_freq_values = _merge_history(pulse_freq_default, pulse_freq_history)
@@ -311,9 +317,9 @@ def _prompt_in_console(
     duration_prompt = f"实验时长(s) [{duration_default}]: " if duration_default else "实验时长(s): "
     mode_prompt = f"激光模式 continuous|pulse [{laser_mode_default}]: " if laser_mode_default else "激光模式 continuous|pulse: "
     on_region_prompt = (
-        f"激光ON区域 chamber1|chamber2|neutral|all [{laser_on_chambers_default}]: "
+        f"激光ON区域 chamber1|chamber2|neutral|all|none [{laser_on_chambers_default}]: "
         if laser_on_chambers_default
-        else "激光ON区域 chamber1|chamber2|neutral|all: "
+        else "激光ON区域 chamber1|chamber2|neutral|all|none: "
     )
     pulse_prompt = f"脉冲频率(Hz) [{pulse_freq_default}]: " if pulse_freq_default else "脉冲频率(Hz): "
     acclimation_prompt = (
@@ -405,12 +411,21 @@ def normalize_laser_on_chambers(value: Any) -> List[str]:
     elif isinstance(value, (list, tuple, set)):
         tokens = [str(token).strip().lower() for token in value if str(token).strip()]
         if not tokens:
-            return ["chamber1"]
+            # Explicit empty list means "none": no chamber can turn laser ON.
+            return []
     else:
         raise ValueError(f"激光ON区域必须是字符串或列表，当前为: {type(value).__name__}")
 
     if any(token in {"all", "*"} for token in tokens):
         return list(_LASER_ON_CHAMBERS_ORDER)
+
+    if any(token in {"none", "off", "disabled", "disable", "no", "0"} for token in tokens):
+        # Explicit OFF region selection: no chamber can turn laser ON.
+        # Mixing none with chamber names is considered invalid to avoid ambiguity.
+        chamber_like = {t for t in tokens if t not in {"none", "off", "disabled", "disable", "no", "0"}}
+        if chamber_like:
+            raise ValueError("激光ON区域不能同时包含 none 和 chamber 名称")
+        return []
 
     normalized: List[str] = []
     invalid: List[str] = []
@@ -424,7 +439,7 @@ def normalize_laser_on_chambers(value: Any) -> List[str]:
 
     if invalid:
         raise ValueError(
-            f"激光ON区域包含无效项: {invalid}；有效值: chamber1, chamber2, neutral, all"
+            f"激光ON区域包含无效项: {invalid}；有效值: chamber1, chamber2, neutral, all, none"
         )
 
     if not normalized:
@@ -435,6 +450,8 @@ def normalize_laser_on_chambers(value: Any) -> List[str]:
 
 def _format_laser_on_chambers(value: Any) -> str:
     normalized = normalize_laser_on_chambers(value)
+    if not normalized:
+        return "none"
     if normalized == list(_LASER_ON_CHAMBERS_ORDER):
         return "all"
     return ",".join(normalized)

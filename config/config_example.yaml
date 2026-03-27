@@ -100,7 +100,8 @@ laser_control:
   # dryrun | continuous | pulse | gated | startstop
   mode: dryrun
   # Which chamber states should trigger laser ON.
-  # Supports: chamber1, chamber2, neutral (aliases: ch1/ch2). Default is [chamber1].
+  # Supports: chamber1, chamber2, neutral, none (aliases: ch1/ch2). Default is [chamber1].
+  # Use [none] to force no chamber-triggered ON transitions (laser stays OFF unless enabled elsewhere).
   on_chambers: [chamber1]
   # For mode=continuous (steady ON/OFF), output line:
   continuous_line: cDAQ1Mod4/port0/line0

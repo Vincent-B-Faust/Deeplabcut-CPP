@@ -71,7 +71,7 @@ laser_control:
   # Pulse mode: ON in selected chambers, OFF otherwise.
   mode: pulse
   # Choose which chamber(s) turn laser ON.
-  # Valid values: chamber1, chamber2, neutral
+  # Valid values: chamber1, chamber2, neutral, none
   on_chambers: [chamber1]
   # Use startstop implementation to match your current setup.
   pulse_mode: startstop

@@ -166,6 +166,26 @@ def test_resolve_session_info_no_prompt_includes_laser_mode_and_freq() -> None:
     assert float(info["acclimation_duration_s"]) == 30.0
 
 
+def test_resolve_session_info_no_prompt_supports_laser_on_none() -> None:
+    config = {
+        "laser_control": {
+            "mode": "continuous",
+            "on_chambers": ["none"],
+        },
+    }
+    args = Namespace(
+        mouse_id="M001",
+        group="test",
+        experiment_duration_s=120.0,
+        duration_s=None,
+        no_session_prompt=True,
+    )
+
+    info = cli._resolve_session_info(config, args)
+    assert info["laser_mode"] == "continuous"
+    assert info["laser_on_chambers"] == []
+
+
 def test_apply_session_laser_settings_preserves_legacy_pulse_mode() -> None:
     config = {
         "laser_control": {

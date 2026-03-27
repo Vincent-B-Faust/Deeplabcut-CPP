@@ -149,7 +149,7 @@ def _format_laser_on_regions_for_name(value: Any) -> str:
     except Exception:
         return ""
     if not chambers:
-        return ""
+        return "onNone"
     if chambers == ["chamber1", "chamber2", "neutral"]:
         return "onAll"
     label_map = {
