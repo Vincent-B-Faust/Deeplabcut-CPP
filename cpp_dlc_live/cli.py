@@ -4,6 +4,7 @@ import argparse
 import copy
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
@@ -34,6 +35,9 @@ def main(argv: Optional[list[str]] = None) -> None:
 
     if args.command == "run_realtime":
         _cmd_run_realtime(args)
+        return
+    if args.command == "run_multi":
+        _cmd_run_multi(args)
         return
     if args.command == "run_offline":
         _cmd_run_offline(args)
@@ -78,6 +82,34 @@ def _build_parser() -> argparse.ArgumentParser:
         "--no_auto_analyze",
         action="store_true",
         help="Skip automatic post-run analysis and plotting",
+    )
+
+    p_multi = sub.add_parser("run_multi", help="Run multiple realtime experiments in parallel")
+    p_multi.add_argument(
+        "--configs",
+        nargs="+",
+        required=True,
+        help="List of config YAML files (one experiment per config)",
+    )
+    p_multi.add_argument(
+        "--out_dir",
+        default=None,
+        help="Optional shared root output dir; each experiment writes to out_dir/exp_XX",
+    )
+    p_multi.add_argument("--duration_s", type=float, default=None, help="Optional duration override for all experiments")
+    p_multi.add_argument("--fixed_fps", type=float, default=None, help="Optional fixed FPS override for all experiments")
+    p_multi.add_argument("--no_preview", action="store_true", help="Disable preview windows for all experiments")
+    p_multi.add_argument("--no_auto_analyze", action="store_true", help="Disable auto analysis for all experiments")
+    p_multi.add_argument("--fail_fast", action="store_true", help="Stop all experiments if any process fails")
+    p_multi.add_argument(
+        "--allow_shared_camera",
+        action="store_true",
+        help="Allow multiple experiments using the same camera source",
+    )
+    p_multi.add_argument(
+        "--allow_shared_ni",
+        action="store_true",
+        help="Allow multiple experiments using shared NI channels/lines",
     )
 
     p_off = sub.add_parser("run_offline", help="Run fast offline replay from existing video")
@@ -222,6 +254,118 @@ def _cmd_run_realtime(args: argparse.Namespace) -> None:
         raise SystemExit(status)
 
     _run_auto_analysis(config=config, no_auto_analyze=bool(args.no_auto_analyze), session_dir=session_dir, logger=logger)
+
+
+def _cmd_run_multi(args: argparse.Namespace) -> None:
+    """Launch multiple realtime experiments in parallel subprocesses.
+
+    Design notes:
+    - We intentionally reuse `run_realtime` as child process so each run keeps
+      the exact same runtime behavior, logging, safety path, and output layout.
+    - Child runs always use `--no_session_prompt`; therefore each config must
+      include complete `session_info` fields required by `_resolve_session_info`.
+    - Startup resource checks are best-effort guardrails for common conflicts
+      (same camera index, same NI channel/line). They can be bypassed by flags
+      when users explicitly want shared resources.
+    """
+    config_paths = [Path(p) for p in list(args.configs or [])]
+    if len(config_paths) < 2:
+        raise ValueError("run_multi requires at least 2 config files")
+    for path in config_paths:
+        if not path.exists():
+            raise FileNotFoundError(f"Config file not found: {path}")
+
+    specs = _collect_multi_run_specs(config_paths)
+    _validate_multi_run_specs(
+        specs=specs,
+        allow_shared_camera=bool(args.allow_shared_camera),
+        allow_shared_ni=bool(args.allow_shared_ni),
+    )
+
+    procs: List[Dict[str, Any]] = []
+    try:
+        for idx, spec in enumerate(specs, start=1):
+            per_out_dir: Optional[str] = None
+            if args.out_dir:
+                # Keep per-experiment outputs separated even under shared root.
+                per_out_dir = str(Path(str(args.out_dir)) / f"exp_{idx:02d}")
+                Path(per_out_dir).mkdir(parents=True, exist_ok=True)
+
+            cmd = _build_run_multi_command(
+                config_path=spec["config_path"],
+                out_dir=per_out_dir,
+                duration_s=args.duration_s,
+                fixed_fps=args.fixed_fps,
+                no_preview=bool(args.no_preview),
+                no_auto_analyze=bool(args.no_auto_analyze),
+            )
+            proc = subprocess.Popen(cmd)
+            procs.append(
+                {
+                    "index": idx,
+                    "name": spec["name"],
+                    "config_path": spec["config_path"],
+                    "proc": proc,
+                    "status": "running",
+                    "return_code": None,
+                }
+            )
+            print(f"[run_multi] started exp#{idx} pid={proc.pid} config={spec['config_path']}")
+
+        failed = 0
+        while True:
+            running = 0
+            for item in procs:
+                proc = item["proc"]
+                rc = proc.poll()
+                if rc is None:
+                    running += 1
+                    continue
+                if item["status"] == "running":
+                    item["return_code"] = int(rc)
+                    item["status"] = "ok" if rc == 0 else "failed"
+                    if rc != 0:
+                        failed += 1
+                        print(
+                            f"[run_multi] failed exp#{item['index']} rc={rc} config={item['config_path']}"
+                        )
+                        if bool(args.fail_fast):
+                            # In fail-fast mode terminate all still-running peers.
+                            for other in procs:
+                                if other["status"] == "running":
+                                    other["proc"].terminate()
+                                    other["status"] = "terminated"
+                            break
+                    else:
+                        print(f"[run_multi] finished exp#{item['index']} rc=0")
+            if running == 0:
+                break
+            if bool(args.fail_fast) and failed > 0:
+                break
+            time.sleep(0.2)
+    finally:
+        # Ensure no orphan processes.
+        for item in procs:
+            proc = item["proc"]
+            if proc.poll() is None:
+                try:
+                    proc.terminate()
+                except Exception:
+                    pass
+        for item in procs:
+            proc = item["proc"]
+            if proc.poll() is None:
+                try:
+                    proc.wait(timeout=3.0)
+                except Exception:
+                    try:
+                        proc.kill()
+                    except Exception:
+                        pass
+
+    failures = [p for p in procs if p.get("return_code") not in (0, None)]
+    if failures:
+        raise SystemExit(2)
 
 
 def _cmd_run_offline(args: argparse.Namespace) -> None:
@@ -572,6 +716,150 @@ def _parse_source(raw: Union[str, int, None]) -> Union[str, int]:
     if text.isdigit():
         return int(text)
     return text
+
+
+def _collect_multi_run_specs(config_paths: List[Path]) -> List[Dict[str, Any]]:
+    """Load configs and extract resources used by each experiment.
+
+    Returns a list of per-config specs used for preflight conflict checks.
+    """
+    specs: List[Dict[str, Any]] = []
+    for path in config_paths:
+        config = load_yaml(path)
+        session_info_raw = config.get("session_info", {})
+        session_info = dict(session_info_raw) if isinstance(session_info_raw, dict) else {}
+        mouse_id = str(session_info.get("mouse_id", "")).strip()
+        group = str(session_info.get("group", "")).strip()
+        duration_s = _optional_float(session_info.get("experiment_duration_s"))
+        if not mouse_id or not group or duration_s is None or duration_s <= 0:
+            raise ValueError(
+                "run_multi requires each config to define session_info.mouse_id/group/experiment_duration_s "
+                "for --no_session_prompt execution"
+            )
+
+        effective = copy.deepcopy(config)
+        effective_laser_cfg = effective.setdefault("laser_control", {})
+        if not isinstance(effective_laser_cfg, dict):
+            effective_laser_cfg = {}
+            effective["laser_control"] = effective_laser_cfg
+        _apply_session_laser_settings(effective, session_info)
+
+        camera_cfg = effective.get("camera", {}) if isinstance(effective.get("camera", {}), dict) else {}
+        camera_source = _parse_source(camera_cfg.get("source", 0))
+        camera_key: Optional[str] = None
+        if isinstance(camera_source, int):
+            # Integer camera index is expected to be exclusive.
+            camera_key = f"cam_index:{camera_source}"
+        elif isinstance(camera_source, str):
+            if not Path(camera_source).exists():
+                # Non-file strings are treated as live stream URLs (exclusive).
+                camera_key = f"cam_stream:{camera_source.strip().lower()}"
+
+        laser_resources = _extract_laser_resources(effective_laser_cfg)
+        specs.append(
+            {
+                "name": path.stem,
+                "config_path": path.resolve(),
+                "camera_source": camera_source,
+                "camera_key": camera_key,
+                "laser_resources": laser_resources,
+            }
+        )
+    return specs
+
+
+def _extract_laser_resources(laser_cfg: Dict[str, Any]) -> List[str]:
+    """Normalize NI resource identifiers used by one laser config.
+
+    These keys are used only for conflict detection in `run_multi`.
+    """
+    enabled = bool(laser_cfg.get("enabled", True))
+    mode = str(laser_cfg.get("mode", "dryrun")).strip().lower()
+    if mode in {"continues", "level"}:
+        mode = "continuous"
+    if not enabled or mode == "dryrun":
+        return []
+
+    resources: List[str] = []
+    if mode == "continuous":
+        line = str(laser_cfg.get("continuous_line", "")).strip() or str(laser_cfg.get("enable_line", "")).strip()
+        if line:
+            resources.append(f"do:{line.lower()}")
+        return resources
+
+    if mode == "pulse":
+        pulse_mode = str(laser_cfg.get("pulse_mode", "gated")).strip().lower()
+        mode = pulse_mode if pulse_mode in {"gated", "startstop"} else "gated"
+
+    ctr = str(laser_cfg.get("ctr_channel", "")).strip()
+    pterm = str(laser_cfg.get("pulse_term", "")).strip()
+    if ctr:
+        resources.append(f"ctr:{ctr.lower()}")
+    if pterm:
+        resources.append(f"pterm:{pterm.lower()}")
+    if mode == "gated":
+        line = str(laser_cfg.get("enable_line", "")).strip()
+        if line:
+            resources.append(f"do:{line.lower()}")
+    return resources
+
+
+def _validate_multi_run_specs(
+    specs: List[Dict[str, Any]],
+    allow_shared_camera: bool,
+    allow_shared_ni: bool,
+) -> None:
+    """Validate preflight conflicts for multi-run execution."""
+    camera_map: Dict[str, List[str]] = {}
+    ni_map: Dict[str, List[str]] = {}
+    for spec in specs:
+        name = str(spec.get("config_path"))
+        camera_key = spec.get("camera_key")
+        if isinstance(camera_key, str) and camera_key:
+            camera_map.setdefault(camera_key, []).append(name)
+        for resource in list(spec.get("laser_resources", [])):
+            ni_map.setdefault(str(resource), []).append(name)
+
+    if not allow_shared_camera:
+        conflicts = {k: v for k, v in camera_map.items() if len(v) > 1}
+        if conflicts:
+            lines = [f"{k} -> {v}" for k, v in sorted(conflicts.items())]
+            raise ValueError(
+                "run_multi camera source conflict detected. "
+                "Use different camera sources or pass --allow_shared_camera.\n" + "\n".join(lines)
+            )
+
+    if not allow_shared_ni:
+        conflicts = {k: v for k, v in ni_map.items() if len(v) > 1}
+        if conflicts:
+            lines = [f"{k} -> {v}" for k, v in sorted(conflicts.items())]
+            raise ValueError(
+                "run_multi NI resource conflict detected. "
+                "Use different NI channels/lines or pass --allow_shared_ni.\n" + "\n".join(lines)
+            )
+
+
+def _build_run_multi_command(
+    config_path: Path,
+    out_dir: Optional[str],
+    duration_s: Optional[float],
+    fixed_fps: Optional[float],
+    no_preview: bool,
+    no_auto_analyze: bool,
+) -> List[str]:
+    """Build the child command for one `run_realtime` subprocess."""
+    cmd = [sys.executable, "-m", "cpp_dlc_live.cli", "run_realtime", "--config", str(config_path), "--no_session_prompt"]
+    if out_dir:
+        cmd.extend(["--out_dir", str(out_dir)])
+    if duration_s is not None:
+        cmd.extend(["--duration_s", str(float(duration_s))])
+    if fixed_fps is not None:
+        cmd.extend(["--fixed_fps", str(float(fixed_fps))])
+    if no_preview:
+        cmd.append("--no_preview")
+    if no_auto_analyze:
+        cmd.append("--no_auto_analyze")
+    return cmd
 
 
 def _optional_float(value: Any) -> Optional[float]:

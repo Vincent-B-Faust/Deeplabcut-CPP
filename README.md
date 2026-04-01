@@ -497,7 +497,79 @@ Notes:
 - By default, analysis is auto-run after each successful realtime session and writes Figure1–Figure5 plus summary.
 - Preview overlay now shows both `laser` state (`0/1`) and `laser_mode` (`continuous` or `pulse xx.xHz`).
 
-## 2) `analyze_session`
+## 2) `run_multi` (parallel realtime runs)
+
+Run multiple realtime experiments in parallel (one process per config):
+
+```bash
+cpp-dlc-live run_multi \
+  --configs config/rig1.yaml config/rig2.yaml \
+  --no_preview
+```
+
+Common options:
+- `--out_dir /path/to/output_root` (multi mode writes to `out_dir/exp_01`, `out_dir/exp_02`, ...)
+- `--duration_s 600` (override all runs)
+- `--fixed_fps 20` (override all runs)
+- `--no_auto_analyze`
+- `--fail_fast` (stop all runs once any run fails)
+- `--allow_shared_camera`
+- `--allow_shared_ni`
+
+Important:
+- `run_multi` always launches child runs with `--no_session_prompt`.
+- Each config must define:
+  - `session_info.mouse_id`
+  - `session_info.group`
+  - `session_info.experiment_duration_s`
+- By default, startup checks block parallel runs with shared camera index or shared NI resources.
+
+How startup conflict checks work:
+- Camera conflict (default blocked):
+  - Two configs using the same camera index (for example both `camera.source: 0`)
+  - Two configs using the same live stream URL
+  - Local video files are not treated as exclusive camera resources
+- NI conflict (default blocked):
+  - Shared `ctr_channel`
+  - Shared `pulse_term`
+  - Shared `enable_line` / `continuous_line`
+- You can bypass checks with:
+  - `--allow_shared_camera`
+  - `--allow_shared_ni`
+  - use only if you intentionally route shared resources
+
+Recommended config pattern for each parallel experiment:
+
+```yaml
+session_info:
+  mouse_id: "M001"
+  group: "CPP_A"
+  experiment_duration_s: 600
+  laser_mode: "pulse"
+  laser_on_chambers: [chamber1]
+```
+
+Practical notes:
+- If you pass `--out_dir`, each child run writes to its own directory:
+  - `out_dir/exp_01/...`
+  - `out_dir/exp_02/...`
+- If `--out_dir` is not set, each config uses its own `project.out_dir`.
+- Multi-run process exits with code `2` if any child run fails.
+- In `--fail_fast` mode, once one child fails, all still-running children are terminated.
+
+Example (two rigs):
+
+```bash
+cpp-dlc-live run_multi \
+  --configs config/rig_a.yaml config/rig_b.yaml \
+  --out_dir D:/Data/CPP/output_multi \
+  --duration_s 600 \
+  --fixed_fps 20 \
+  --no_preview \
+  --fail_fast
+```
+
+## 3) `analyze_session`
 
 ```bash
 cpp-dlc-live analyze_session --session_dir data/session_20260226_120000
@@ -531,7 +603,7 @@ cpp-dlc-live analyze_session \
   --no_plots
 ```
 
-## 3) `analyze_issues`
+## 4) `analyze_issues`
 
 ```bash
 cpp-dlc-live analyze_issues --session_dir data/session_20260226_120000
@@ -545,7 +617,7 @@ Outputs:
 - `issue_timeline.csv`
 - `incident_summary.csv`
 
-## 4) `analyze_batch`
+## 5) `analyze_batch`
 
 ```bash
 cpp-dlc-live analyze_batch --root_dir data --recursive
@@ -569,7 +641,7 @@ Output:
 - when time range is specified, each session writes analysis artifacts under its own
   `analysis_range_<start>_to_<end>/` subfolder.
 
-## 5) `run_offline` (fast full replay from raw video)
+## 6) `run_offline` (fast full replay from raw video)
 
 Use this when you already have a raw video and want the full pipeline outputs (`cpp_realtime_log.csv`, preview/raw recording, summary, Figure1-5) without realtime pacing.
 
@@ -609,7 +681,7 @@ Batch source rule:
 - In each session folder, only `*_raw_video.*`/`raw_video.*` files are selected.
 - `preview/overlay` videos are ignored for batch source selection.
 
-## 6) `calibrate_roi`
+## 7) `calibrate_roi`
 
 ```bash
 cpp-dlc-live calibrate_roi --config config/config_example.yaml --camera_source 0
