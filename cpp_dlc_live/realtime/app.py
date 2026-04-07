@@ -18,6 +18,7 @@ from cpp_dlc_live.realtime.debounce import Debouncer
 from cpp_dlc_live.realtime.dlc_runtime import RuntimeBase, build_runtime
 from cpp_dlc_live.realtime.issue_logger import SessionIssueLogger
 from cpp_dlc_live.realtime.recorder import CSVRecorder
+from cpp_dlc_live.realtime.performance import RuntimePriorityManager
 from cpp_dlc_live.realtime.roi import ChamberROI
 from cpp_dlc_live.utils.io_utils import ensure_prefixed_filename, file_sha256, save_json
 from cpp_dlc_live.utils.time_utils import utc_now_iso
@@ -69,6 +70,7 @@ class RealtimeApp:
         controller: Optional[LaserControllerBase] = None
         recorder: Optional[CSVRecorder] = None
         issue_logger: Optional[SessionIssueLogger] = None
+        priority_manager: Optional[RuntimePriorityManager] = None
         preview_writer: Optional[cv2.VideoWriter] = None
         raw_writer: Optional[cv2.VideoWriter] = None
 
@@ -198,6 +200,20 @@ class RealtimeApp:
         except Exception:
             self.logger.exception("Failed to initialize structured issue logger, continuing without it")
             issue_logger = SessionIssueLogger(self.session_dir / issue_events_file, enabled=False)
+        # Best-effort runtime priority boost to reduce FPS drops when window loses focus
+        # (notably on Windows scheduler + power-throttling behavior).
+        runtime_priority_cfg = self.config.get("runtime_priority", {})
+        priority_manager = RuntimePriorityManager(runtime_priority_cfg, logger=self.logger)
+        runtime_priority_result = priority_manager.apply()
+        metadata["runtime_priority"] = runtime_priority_result
+        self.logger.info(
+            "Runtime priority: enabled=%s level=%s applied=%s actions=%s warnings=%s",
+            runtime_priority_result.get("enabled"),
+            runtime_priority_result.get("requested_level"),
+            runtime_priority_result.get("applied"),
+            runtime_priority_result.get("actions"),
+            runtime_priority_result.get("warnings"),
+        )
         issue_logger.log(
             "session_start",
             level="INFO",
@@ -787,6 +803,12 @@ class RealtimeApp:
                     cv2.destroyAllWindows()
                 except Exception:
                     pass
+
+            if priority_manager is not None:
+                restore_result = priority_manager.restore()
+                metadata["runtime_priority_restore"] = restore_result
+                if restore_result.get("warnings"):
+                    self.logger.warning("Runtime priority restore warnings: %s", restore_result.get("warnings"))
 
             end_wall = time.time()
             metadata.update(

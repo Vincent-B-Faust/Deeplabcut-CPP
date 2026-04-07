@@ -140,3 +140,13 @@ runtime_logging:
   low_conf_warn_every_n: 30
   inference_warn_ms: 80.0
   fps_warn_below: 10.0
+
+# Optional process scheduling tuning to reduce background FPS drops.
+runtime_priority:
+  enabled: true
+  # normal | above_normal | high | realtime
+  level: high
+  # Windows only: disable OS execution-speed throttling for this process.
+  disable_windows_power_throttling: true
+  # Windows only: request higher timer precision (1-16ms).
+  windows_timer_resolution_ms: 1

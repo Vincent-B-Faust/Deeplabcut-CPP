@@ -368,6 +368,18 @@ Note: always replace any machine-specific paths with your own absolute paths.
 - `runtime_logging.inference_warn_ms`
 - `runtime_logging.fps_warn_below`
 
+### `runtime_priority`
+- `runtime_priority.enabled`: enable best-effort scheduler tuning (default `true`)
+- `runtime_priority.level`: `normal` | `above_normal` | `high` | `realtime` (default `high`)
+- `runtime_priority.disable_windows_power_throttling`: Windows only, disables execution speed throttling for this process
+- `runtime_priority.windows_timer_resolution_ms`: Windows only, requests higher timer precision (`1-16`)
+
+Notes:
+- This is best-effort and never crashes the experiment if OS denies the request.
+- Applied actions and warnings are written into `metadata.json` under:
+  - `runtime_priority`
+  - `runtime_priority_restore`
+
 ## Example: minimal Windows dryrun + DLC
 
 ```yaml
@@ -460,6 +472,12 @@ runtime_logging:
   low_conf_warn_every_n: 30
   inference_warn_ms: 80.0
   fps_warn_below: 10.0
+
+runtime_priority:
+  enabled: true
+  level: high
+  disable_windows_power_throttling: true
+  windows_timer_resolution_ms: 1
 ```
 
 ## CLI Commands
@@ -840,6 +858,22 @@ Cause:
 
 Action:
 - keep `camera.width/height/flip/rotate_deg` consistent between calibration and runtime.
+
+## FPS drops when preview window is not in foreground (Windows)
+
+Symptoms:
+- FPS is stable when the experiment window is focused, but drops when the window is in background.
+
+Actions:
+1. Enable runtime scheduler tuning in config:
+   - `runtime_priority.enabled: true`
+   - `runtime_priority.level: high`
+   - `runtime_priority.disable_windows_power_throttling: true`
+   - `runtime_priority.windows_timer_resolution_ms: 1`
+2. For maximum stability, run with `--no_preview` and keep only recording outputs.
+3. Check session metadata for applied actions/warnings:
+   - `runtime_priority`
+   - `runtime_priority_restore`
 
 ## Development and Tests
 
