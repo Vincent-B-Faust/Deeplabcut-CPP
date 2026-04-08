@@ -12,6 +12,7 @@ import cv2
 import pandas as pd
 
 from cpp_dlc_live.analysis.analyze import analyze_session
+from cpp_dlc_live.analysis.group_summary import summarize_group_chamber_metrics
 from cpp_dlc_live.analysis.issues import analyze_issues
 from cpp_dlc_live.realtime.app import RealtimeApp
 from cpp_dlc_live.realtime.camera import CameraConfig, CameraStream
@@ -50,6 +51,9 @@ def main(argv: Optional[list[str]] = None) -> None:
         return
     if args.command == "analyze_batch":
         _cmd_analyze_batch(args)
+        return
+    if args.command == "analyze_group_summary":
+        _cmd_analyze_group_summary(args)
         return
     if args.command == "calibrate_roi":
         _cmd_calibrate_roi(args)
@@ -199,6 +203,23 @@ def _build_parser() -> argparse.ArgumentParser:
         "--report_name",
         default="batch_analysis_report.csv",
         help="Output CSV report filename under root_dir",
+    )
+
+    p_group = sub.add_parser(
+        "analyze_group_summary",
+        help="Aggregate all sessions under a root dir into mouse/group chamber-time summary CSV",
+    )
+    p_group.add_argument("--root_dir", required=True, help="Root directory containing session subfolders")
+    p_group.add_argument("--recursive", action="store_true", help="Recursively scan subdirectories")
+    p_group.add_argument(
+        "--out_csv",
+        default="group_chamber_summary.csv",
+        help="Output CSV path (absolute or relative to root_dir)",
+    )
+    p_group.add_argument(
+        "--strict_identity",
+        action="store_true",
+        help="Fail when mouse_id/group cannot be resolved from metadata/config/session name",
     )
 
     p_cal = sub.add_parser("calibrate_roi", help="Interactive ROI calibrator")
@@ -639,6 +660,29 @@ def _cmd_analyze_batch(args: argparse.Namespace) -> None:
     print(report_path)
     if failed > 0:
         raise SystemExit(2)
+
+
+def _cmd_analyze_group_summary(args: argparse.Namespace) -> None:
+    root_dir = Path(args.root_dir)
+    if not root_dir.exists():
+        raise FileNotFoundError(f"Root directory not found: {root_dir}")
+
+    session_dirs = _discover_session_dirs(root_dir=root_dir, recursive=bool(args.recursive))
+    if not session_dirs:
+        raise RuntimeError(f"No valid session folder found under: {root_dir}")
+
+    out_csv = Path(str(args.out_csv))
+    if not out_csv.is_absolute():
+        out_csv = root_dir / out_csv
+
+    logger = setup_logging(root_dir, file_prefix=None)
+    summary_path = summarize_group_chamber_metrics(
+        session_dirs=session_dirs,
+        output_csv=out_csv,
+        strict_identity=bool(args.strict_identity),
+        logger=logger,
+    )
+    print(summary_path)
 
 
 def _cmd_calibrate_roi(args: argparse.Namespace) -> None:

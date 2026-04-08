@@ -659,7 +659,34 @@ Output:
 - when time range is specified, each session writes analysis artifacts under its own
   `analysis_range_<start>_to_<end>/` subfolder.
 
-## 6) `run_offline` (fast full replay from raw video)
+## 6) `analyze_group_summary`
+
+Aggregate all sessions under one root directory into a mouse/group chamber summary table.
+
+```bash
+cpp-dlc-live analyze_group_summary --root_dir data --recursive
+```
+
+Options:
+- `--out_csv group_chamber_summary.csv` (absolute path or relative to `root_dir`)
+- `--strict_identity` (fail if a session cannot resolve `mouse_id`/`group`)
+
+Identity resolution order per session:
+1. `metadata.json` (or prefixed `*_metadata.json`) → `config.session_info`
+2. `config_used.yaml` (or prefixed `*_config_used.yaml`) → `session_info`
+3. session folder name pattern: `session_YYYYMMDD_HHMMSS_<mouse_id>_<group>_...`
+
+Output format:
+- first column: `mouse_id`
+- then per-group columns:
+  - `<group>_chamber1_time_s`
+  - `<group>_chamber1_pct`
+  - `<group>_chamber2_time_s`
+  - `<group>_chamber2_pct`
+
+Percentages are computed against the aggregated session duration for each `mouse_id + group`.
+
+## 7) `run_offline` (fast full replay from raw video)
 
 Use this when you already have a raw video and want the full pipeline outputs (`cpp_realtime_log.csv`, preview/raw recording, summary, Figure1-5) without realtime pacing.
 
@@ -699,7 +726,7 @@ Batch source rule:
 - In each session folder, only `*_raw_video.*`/`raw_video.*` files are selected.
 - `preview/overlay` videos are ignored for batch source selection.
 
-## 7) `calibrate_roi`
+## 8) `calibrate_roi`
 
 ```bash
 cpp-dlc-live calibrate_roi --config config/config_example.yaml --camera_source 0
