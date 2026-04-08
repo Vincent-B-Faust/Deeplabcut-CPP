@@ -670,6 +670,7 @@ cpp-dlc-live analyze_group_summary --root_dir data --recursive
 Options:
 - `--out_csv group_chamber_summary.csv` (absolute path or relative to `root_dir`)
 - `--strict_identity` (fail if a session cannot resolve `mouse_id`/`group`)
+- `--layout prism|wide` (`prism` default; `wide` keeps the old mouse-row layout)
 
 Identity resolution order per session:
 1. `metadata.json` (or prefixed `*_metadata.json`) → `config.session_info`
@@ -677,12 +678,17 @@ Identity resolution order per session:
 3. session folder name pattern: `session_YYYYMMDD_HHMMSS_<mouse_id>_<group>_...`
 
 Output format:
-- first column: `mouse_id`
-- then per-group columns:
-  - `<group>_chamber1_time_s`
-  - `<group>_chamber1_pct`
-  - `<group>_chamber2_time_s`
-  - `<group>_chamber2_pct`
+- `--layout prism` (default, GraphPad Prism friendly):
+  - first column: `metric`
+  - subsequent columns: `mouse_id`
+  - rows are transposed metrics such as:
+    - `<group>_chamber1_time_s`
+    - `<group>_chamber1_pct`
+    - `<group>_chamber2_time_s`
+    - `<group>_chamber2_pct`
+- `--layout wide` (legacy):
+  - first column: `mouse_id`
+  - subsequent columns are the per-group metric fields above.
 
 Percentages are computed against the aggregated session duration for each `mouse_id + group`.
 

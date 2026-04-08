@@ -5,7 +5,7 @@ import logging
 import re
 from collections import defaultdict
 from pathlib import Path
-from typing import Any, Dict, Iterable, Optional, Tuple
+from typing import Any, Dict, Iterable, Literal, Optional, Tuple
 
 import pandas as pd
 
@@ -19,18 +19,25 @@ _SESSION_NAME_RE = re.compile(r"^session_\d{8}_\d{6}_(?P<mouse>[^_]+)_(?P<group>
 def summarize_group_chamber_metrics(
     session_dirs: Iterable[Path],
     output_csv: Path,
+    layout: Literal["prism", "wide"] = "prism",
     strict_identity: bool = False,
     logger: Optional[logging.Logger] = None,
 ) -> Path:
     """Aggregate chamber1/chamber2 metrics by mouse_id + group across sessions.
 
-    Output is a wide CSV with:
-    - first column: mouse_id
-    - per-group columns:
-      - <group>_chamber1_time_s
-      - <group>_chamber1_pct
-      - <group>_chamber2_time_s
-      - <group>_chamber2_pct
+    Layout modes:
+    - `wide` (legacy):
+      - first column: `mouse_id`
+      - per-group columns:
+        - <group>_chamber1_time_s
+        - <group>_chamber1_pct
+        - <group>_chamber2_time_s
+        - <group>_chamber2_pct
+    - `prism` (default):
+      - first column: `metric`
+      - remaining columns: one column per `mouse_id`
+      - each row is one metric (transposed from wide), convenient for direct
+        copy/paste into GraphPad Prism.
 
     Percentages are computed against aggregated session duration for that
     mouse/group pair.
@@ -81,12 +88,18 @@ def summarize_group_chamber_metrics(
         slot["n_sessions"] += 1.0
         processed += 1
 
-    rows = _build_wide_rows(grouped)
+    if layout == "wide":
+        rows = _build_wide_rows(grouped)
+    elif layout == "prism":
+        rows = _build_prism_rows(grouped)
+    else:
+        raise ValueError(f"Unsupported layout: {layout}")
     output_csv.parent.mkdir(parents=True, exist_ok=True)
     pd.DataFrame(rows).to_csv(output_csv, index=False)
     logger.info(
         "Group chamber summary written: %s (processed_sessions=%d skipped_sessions=%d mice=%d)",
         output_csv,
+        layout,
         processed,
         skipped,
         len(rows),
@@ -127,6 +140,16 @@ def _build_wide_rows(grouped: Dict[str, Dict[str, Dict[str, float]]]) -> list[Di
                 row[col_pct_ch2] = 0.0
         rows.append(row)
     return rows
+
+
+def _build_prism_rows(grouped: Dict[str, Dict[str, Dict[str, float]]]) -> list[Dict[str, Any]]:
+    """Build transposed table: rows=metric, columns=mouse_id."""
+    wide_rows = _build_wide_rows(grouped)
+    if not wide_rows:
+        return []
+    wide_df = pd.DataFrame(wide_rows).sort_values("mouse_id")
+    prism_df = wide_df.set_index("mouse_id").T.reset_index().rename(columns={"index": "metric"})
+    return prism_df.to_dict(orient="records")
 
 
 def _resolve_session_identity(
@@ -250,4 +273,3 @@ def _as_float(value: Any) -> float:
     if pd.isna(v):
         return 0.0
     return v
-

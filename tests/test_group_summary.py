@@ -60,6 +60,7 @@ def test_cmd_analyze_group_summary_writes_wide_csv(tmp_path) -> None:
         recursive=False,
         out_csv="group_chamber_summary.csv",
         strict_identity=False,
+        layout="wide",
     )
     _cmd_analyze_group_summary(args)
 
@@ -100,7 +101,32 @@ def test_cmd_analyze_group_summary_strict_identity_raises(tmp_path) -> None:
         recursive=False,
         out_csv="group_chamber_summary.csv",
         strict_identity=True,
+        layout="prism",
     )
     with pytest.raises(ValueError):
         _cmd_analyze_group_summary(args)
 
+
+def test_cmd_analyze_group_summary_prism_layout(tmp_path) -> None:
+    s1 = tmp_path / "session_20260301_120000_M001_pretest_60s"
+    s2 = tmp_path / "session_20260301_130000_M002_pretest_60s"
+    s1.mkdir()
+    s2.mkdir()
+    _write_log(s1 / "cpp_realtime_log.csv", ["chamber1", "chamber2", "chamber2"])
+    _write_log(s2 / "cpp_realtime_log.csv", ["chamber1", "chamber1", "chamber2"])
+
+    args = Namespace(
+        root_dir=str(tmp_path),
+        recursive=False,
+        out_csv="group_chamber_summary.csv",
+        strict_identity=False,
+        layout="prism",
+    )
+    _cmd_analyze_group_summary(args)
+
+    out = pd.read_csv(tmp_path / "group_chamber_summary.csv")
+    assert list(out.columns)[0] == "metric"
+    assert "M001" in out.columns
+    assert "M002" in out.columns
+    assert "pretest_chamber1_time_s" in set(out["metric"])
+    assert "pretest_chamber2_time_s" in set(out["metric"])

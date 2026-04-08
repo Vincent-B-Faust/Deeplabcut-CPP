@@ -221,6 +221,12 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Fail when mouse_id/group cannot be resolved from metadata/config/session name",
     )
+    p_group.add_argument(
+        "--layout",
+        choices=["prism", "wide"],
+        default="prism",
+        help="Output table layout: prism=transposed for GraphPad Prism (default), wide=legacy mouse-row format",
+    )
 
     p_cal = sub.add_parser("calibrate_roi", help="Interactive ROI calibrator")
     p_cal.add_argument("--config", required=True, help="Config YAML to load/update")
@@ -679,6 +685,7 @@ def _cmd_analyze_group_summary(args: argparse.Namespace) -> None:
     summary_path = summarize_group_chamber_metrics(
         session_dirs=session_dirs,
         output_csv=out_csv,
+        layout=str(args.layout),
         strict_identity=bool(args.strict_identity),
         logger=logger,
     )
