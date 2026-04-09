@@ -97,7 +97,7 @@ def summarize_group_chamber_metrics(
     output_csv.parent.mkdir(parents=True, exist_ok=True)
     pd.DataFrame(rows).to_csv(output_csv, index=False)
     logger.info(
-        "Group chamber summary written: %s (processed_sessions=%d skipped_sessions=%d mice=%d)",
+        "Group chamber summary written: %s (layout=%s processed_sessions=%d skipped_sessions=%d mice=%d)",
         output_csv,
         layout,
         processed,

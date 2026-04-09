@@ -160,13 +160,7 @@ def plot_position_heatmap(
 
 def plot_chamber_time_bars(df: pd.DataFrame, out_path: Path, fixed_fps_hz: Optional[float] = None) -> None:
     """Figure 3: chamber1/chamber2 dwell durations and percentages."""
-    dt = state_stats_dt(compute_dt_seconds(df, fixed_fps_hz=fixed_fps_hz))
-    chamber = normalize_chamber_series(df.get("chamber"), length=len(df)).to_numpy(dtype=str)
-
-    labels = ["chamber1", "chamber2"]
-    durations = np.array([float(dt[chamber == label].sum()) for label in labels], dtype=float)
-    total = float(durations.sum())
-    percentages = (durations / total * 100.0) if total > 0 else np.zeros_like(durations)
+    labels, durations, percentages = _compute_chamber_time_percentages(df=df, fixed_fps_hz=fixed_fps_hz)
 
     fig, axes = plt.subplots(2, 1, figsize=(8, 7), sharex=True)
 
@@ -177,7 +171,7 @@ def plot_chamber_time_bars(df: pd.DataFrame, out_path: Path, fixed_fps_hz: Optio
         axes[0].text(i, v, f"{v:.2f}", ha="center", va="bottom", fontsize=9)
 
     axes[1].bar(labels, percentages, color=["tab:green", "tab:orange"])
-    axes[1].set_title("Figure 3B: Dwell Percentage in Chambers")
+    axes[1].set_title("Figure 3B: Dwell Percentage of Total Session Time")
     axes[1].set_ylabel("Percentage (%)")
     axes[1].set_ylim(0, 100)
     for i, v in enumerate(percentages):
@@ -186,6 +180,26 @@ def plot_chamber_time_bars(df: pd.DataFrame, out_path: Path, fixed_fps_hz: Optio
     fig.tight_layout()
     fig.savefig(out_path, dpi=150)
     plt.close(fig)
+
+
+def _compute_chamber_time_percentages(
+    df: pd.DataFrame,
+    fixed_fps_hz: Optional[float] = None,
+) -> Tuple[list[str], np.ndarray, np.ndarray]:
+    """Compute chamber1/chamber2 dwell durations and percentages.
+
+    Percentages are normalized by the total session duration (sum(dt)), not by
+    chamber1+chamber2 duration only.
+    """
+    dt = compute_dt_seconds(df, fixed_fps_hz=fixed_fps_hz)
+    dt_state = state_stats_dt(dt)
+    chamber = normalize_chamber_series(df.get("chamber"), length=len(df)).to_numpy(dtype=str)
+
+    labels = ["chamber1", "chamber2"]
+    durations = np.array([float(dt_state[chamber == label].sum()) for label in labels], dtype=float)
+    session_total = float(np.nansum(dt))
+    percentages = (durations / session_total * 100.0) if session_total > 0 else np.zeros_like(durations)
+    return labels, durations, percentages
 
 
 def plot_speed(speed_df: pd.DataFrame, out_path: Path) -> None:

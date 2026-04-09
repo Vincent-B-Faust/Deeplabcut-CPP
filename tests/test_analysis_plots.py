@@ -3,9 +3,10 @@ from __future__ import annotations
 import json
 
 import pandas as pd
+import pytest
 
 from cpp_dlc_live.analysis.analyze import analyze_session
-from cpp_dlc_live.analysis.plots import _resolve_spatial_limits
+from cpp_dlc_live.analysis.plots import _compute_chamber_time_percentages, _resolve_spatial_limits
 
 
 def test_analyze_session_generates_figure1_to_5_with_prefix(tmp_path) -> None:
@@ -84,3 +85,21 @@ def test_analyze_session_time_range_outputs_to_subdir(tmp_path) -> None:
     assert summary_path.parent.name == "analysis_range_2s_to_5s"
     assert summary_path.exists()
     assert (summary_path.parent / f"{prefix}_occupancy_over_time.png").exists()
+
+
+def test_chamber_percentages_use_total_session_duration() -> None:
+    # t_wall -> dt=[1,1,1], then state_stats_dt excludes first frame -> [0,1,1]
+    # chamber1=1s, chamber2=1s, session_total=3s => each 33.33%
+    df = pd.DataFrame(
+        {
+            "t_wall": [0.0, 1.0, 2.0],
+            "frame_idx": [0, 1, 2],
+            "chamber": ["chamber1", "chamber2", "chamber1"],
+        }
+    )
+    labels, durations, percentages = _compute_chamber_time_percentages(df=df, fixed_fps_hz=None)
+    assert labels == ["chamber1", "chamber2"]
+    assert durations[0] == 1.0
+    assert durations[1] == 1.0
+    assert percentages[0] == pytest.approx((1.0 / 3.0) * 100.0, rel=1e-6)
+    assert percentages[1] == pytest.approx((1.0 / 3.0) * 100.0, rel=1e-6)

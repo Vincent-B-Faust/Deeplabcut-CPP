@@ -800,6 +800,7 @@ Each session directory includes (depending on command and options):
 - `<session_id>_figure1_trajectory_speed_heatmap.png`: trajectory with speed-coded color
 - `<session_id>_figure2_position_heatmap.png`: position occupancy heatmap
 - `<session_id>_figure3_chamber_dwell.png`: chamber1/chamber2 dwell time + percentage bars
+  - Percentage denominator is total session duration (`session_duration_s`), not `chamber1+chamber2` only.
 - `<session_id>_speed_over_time.png`: Figure 4
 - `<session_id>_occupancy_over_time.png`: Figure 5
 - `<session_id>_issue_summary.csv`, `<session_id>_issue_timeline.csv`, `<session_id>_incident_summary.csv` (from `analyze_issues`)
