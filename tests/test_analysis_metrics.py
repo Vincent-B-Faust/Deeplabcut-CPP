@@ -1,6 +1,6 @@
 import pandas as pd
 
-from cpp_dlc_live.analysis.metrics import compute_summary
+from cpp_dlc_live.analysis.metrics import compute_speed_series, compute_summary
 
 
 def test_compute_summary_basic() -> None:
@@ -67,3 +67,22 @@ def test_compute_summary_maps_unknown_to_neutral() -> None:
     assert summary["time_ch1_s"] == 1.0
     assert summary["time_ch2_s"] == 0.0
     assert summary["time_neutral_s"] == 1.0
+
+
+def test_compute_speed_series_blends_wall_time_and_frame_index() -> None:
+    df = pd.DataFrame(
+        {
+            # Wall-clock deltas are unrealistically tiny (e.g., offline-fast processing time),
+            # but frame index + fixed_fps indicate a stable 0.5 s step.
+            "t_wall": [0.0, 0.001, 0.002, 0.003],
+            "frame_idx": [0, 1, 2, 3],
+            "x": [0.0, 1.0, 2.0, 3.0],
+            "y": [0.0, 0.0, 0.0, 0.0],
+        }
+    )
+
+    speed_df = compute_speed_series(df, fixed_fps_hz=2.0)
+    # Dist per step = 1 px, chosen dt should be 0.5 s => speed ~2 px/s.
+    assert speed_df["speed_px_s"].iloc[1] == 2.0
+    assert speed_df["speed_px_s"].iloc[2] == 2.0
+    assert speed_df["speed_px_s"].iloc[3] == 2.0

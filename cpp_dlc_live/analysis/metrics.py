@@ -77,7 +77,7 @@ def compute_speed_series(df: pd.DataFrame, fixed_fps_hz: Optional[float] = None)
     if n == 0:
         return pd.DataFrame(columns=["t_wall", "speed_px_s"])
 
-    dt = compute_dt_seconds(df, fixed_fps_hz=fixed_fps_hz)
+    dt = compute_speed_dt_seconds(df, fixed_fps_hz=fixed_fps_hz)
     x = pd.to_numeric(df.get("x"), errors="coerce").to_numpy(dtype=float)
     y = pd.to_numeric(df.get("y"), errors="coerce").to_numpy(dtype=float)
 
@@ -98,6 +98,66 @@ def compute_speed_series(df: pd.DataFrame, fixed_fps_hz: Optional[float] = None)
             "speed_px_s": speed,
         }
     )
+
+
+def compute_speed_dt_seconds(df: pd.DataFrame, fixed_fps_hz: Optional[float] = None) -> np.ndarray:
+    """Compute dt used specifically by speed calculation.
+
+    Strategy:
+    1. Use wall-clock deltas (`t_wall`) when valid.
+    2. If `frame_idx` + `fixed_fps_hz` are available, compute frame-based dt.
+    3. Blend for robustness:
+       - fill invalid wall dt by frame-based dt
+       - when wall dt and frame-based dt diverge heavily, prefer frame-based dt
+         to avoid distorted speeds during dropped frames or offline-fast replay.
+    """
+    if df.empty:
+        return np.array([], dtype=float)
+
+    n = len(df)
+    dt = np.zeros(n, dtype=float)
+    if n <= 1:
+        if fixed_fps_hz is not None and fixed_fps_hz > 0:
+            dt[0] = 1.0 / float(fixed_fps_hz)
+        return dt
+
+    t = pd.to_numeric(df.get("t_wall"), errors="coerce").to_numpy(dtype=float)
+    dt_wall = np.diff(t)
+    dt_wall = np.where(np.isfinite(dt_wall) & (dt_wall > 0), dt_wall, np.nan)
+
+    dt_frame = np.full(n - 1, np.nan, dtype=float)
+    frame_idx = pd.to_numeric(df.get("frame_idx"), errors="coerce").to_numpy(dtype=float)
+    if np.isfinite(frame_idx).any():
+        frame_delta = np.diff(frame_idx)
+        frame_delta = np.where(np.isfinite(frame_delta) & (frame_delta > 0), frame_delta, np.nan)
+        if fixed_fps_hz is not None and fixed_fps_hz > 0:
+            dt_frame = frame_delta / float(fixed_fps_hz)
+
+    chosen = np.array(dt_wall, dtype=float, copy=True)
+
+    # Fill missing wall time by frame-derived time.
+    fill_mask = ~np.isfinite(chosen) & np.isfinite(dt_frame) & (dt_frame > 0)
+    chosen[fill_mask] = dt_frame[fill_mask]
+
+    # If both are valid but disagree too much, prefer frame-derived dt for stability.
+    both_mask = np.isfinite(chosen) & np.isfinite(dt_frame) & (dt_frame > 0)
+    if np.any(both_mask):
+        ratio = chosen[both_mask] / dt_frame[both_mask]
+        unstable = (ratio < 0.5) | (ratio > 2.0)
+        if np.any(unstable):
+            idx = np.where(both_mask)[0][unstable]
+            chosen[idx] = dt_frame[idx]
+
+    dt[:-1] = np.nan_to_num(chosen, nan=0.0, posinf=0.0, neginf=0.0)
+
+    positive = dt[:-1][dt[:-1] > 0]
+    if positive.size:
+        dt[-1] = float(np.median(positive))
+    elif fixed_fps_hz is not None and fixed_fps_hz > 0:
+        dt[-1] = 1.0 / float(fixed_fps_hz)
+    else:
+        dt[-1] = 0.0
+    return dt
 
 
 def compute_summary(

@@ -228,6 +228,36 @@ def _parse_identity_from_session_name(name: str) -> Optional[Tuple[str, str]]:
 
 
 def _load_or_compute_session_summary(session_dir: Path, logger: logging.Logger) -> Optional[Dict[str, Any]]:
+    log_path = resolve_session_file(session_dir, "cpp_realtime_log.csv")
+    config_path = resolve_session_file(session_dir, "config_used.yaml")
+    metadata_path = resolve_session_file(session_dir, "metadata.json")
+    config = {}
+    metadata = {}
+    if config_path.exists():
+        try:
+            config = load_yaml(config_path)
+        except Exception:
+            logger.exception("Failed to parse config for summary: %s", config_path)
+            config = {}
+    if metadata_path.exists():
+        try:
+            with metadata_path.open("r", encoding="utf-8") as f:
+                payload = json.load(f)
+            if isinstance(payload, dict):
+                metadata = payload
+        except Exception:
+            logger.exception("Failed to parse metadata for summary: %s", metadata_path)
+            metadata = {}
+
+    if log_path.exists():
+        try:
+            df = pd.read_csv(log_path)
+        except Exception:
+            logger.exception("Failed to read realtime log: %s", log_path)
+            return None
+        fixed_fps_hz = _resolve_group_summary_timebase(config=config, metadata=metadata)
+        return compute_summary(df, cm_per_px=None, fixed_fps_hz=fixed_fps_hz)
+
     summary_path = resolve_session_file(session_dir, "summary.csv")
     if summary_path.exists():
         try:
@@ -235,34 +265,41 @@ def _load_or_compute_session_summary(session_dir: Path, logger: logging.Logger) 
             if not summary_df.empty:
                 return dict(summary_df.iloc[0].to_dict())
         except Exception:
-            logger.exception("Failed to read summary.csv, fallback to realtime log: %s", summary_path)
+            logger.exception("Failed to read summary.csv: %s", summary_path)
 
-    log_path = resolve_session_file(session_dir, "cpp_realtime_log.csv")
-    if not log_path.exists():
-        logger.warning("Skip session without summary/log: %s", session_dir)
+    logger.warning("Skip session without summary/log: %s", session_dir)
+    return None
+
+
+def _resolve_group_summary_timebase(config: Dict[str, Any], metadata: Dict[str, Any]) -> Optional[float]:
+    analysis_cfg = config.get("analysis", {}) if isinstance(config, dict) else {}
+    if not isinstance(analysis_cfg, dict):
+        analysis_cfg = {}
+
+    mode_raw = str(analysis_cfg.get("timebase_mode", "auto")).strip().lower()
+    global_fixed = _coerce_optional_positive_float(config.get("fixed_fps"))
+    analysis_fixed = _coerce_optional_positive_float(analysis_cfg.get("fixed_fps_hz"))
+
+    if mode_raw in {"fixed", "fps", "frame"}:
+        return global_fixed if global_fixed is not None else analysis_fixed
+    if mode_raw in {"wall", "realtime", "t_wall"}:
         return None
+    # auto/default
+    if bool(metadata.get("offline_fast", False)):
+        return global_fixed if global_fixed is not None else analysis_fixed
+    return None
 
+
+def _coerce_optional_positive_float(value: Any) -> Optional[float]:
+    if value is None:
+        return None
     try:
-        df = pd.read_csv(log_path)
+        parsed = float(value)
     except Exception:
-        logger.exception("Failed to read realtime log: %s", log_path)
         return None
-
-    fixed_fps_hz: Optional[float] = None
-    config_path = resolve_session_file(session_dir, "config_used.yaml")
-    if config_path.exists():
-        try:
-            config = load_yaml(config_path)
-            if isinstance(config, dict):
-                raw_fixed = config.get("fixed_fps")
-                if raw_fixed is not None:
-                    parsed = float(raw_fixed)
-                    if parsed > 0:
-                        fixed_fps_hz = parsed
-        except Exception:
-            logger.exception("Failed to parse fixed_fps from config: %s", config_path)
-
-    return compute_summary(df, cm_per_px=None, fixed_fps_hz=fixed_fps_hz)
+    if parsed <= 0:
+        return None
+    return parsed
 
 
 def _as_float(value: Any) -> float:

@@ -604,6 +604,16 @@ Options:
 - `--overlay_video_source /path/to/raw_or_preview.mp4` (optional source override)
 - `--overlay_video_filename analysis_overlay.mp4` (optional output filename)
 
+Timebase policy for analysis metrics:
+- Default (`analysis.timebase_mode: auto`):
+  - realtime sessions (`offline_fast=false`): use `t_wall` wall-clock deltas (robust to fps jitter)
+  - offline fast replay sessions (`offline_fast=true`): use fixed FPS timebase (`fixed_fps` / `analysis.fixed_fps_hz`)
+- Force wall-clock: set `analysis.timebase_mode: wall`
+- Force fixed-FPS: set `analysis.timebase_mode: fixed` (requires `fixed_fps` or `analysis.fixed_fps_hz`)
+- Speed calculation uses a dynamic dt policy:
+  - prefer `t_wall` deltas
+  - when `frame_idx + fixed_fps` is available and wall-time is unstable, speed dt falls back to frame-based dt
+
 Time-range output rule:
 - If `--time_start_s` and/or `--time_end_s` is provided, analysis outputs are written under:
   - `session_dir/analysis_range_<start>_to_<end>/`

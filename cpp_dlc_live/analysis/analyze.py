@@ -62,18 +62,25 @@ def analyze_session(
         analysis_cfg.get("fixed_fps_hz"),
         field_name="analysis.fixed_fps_hz",
     )
-    fixed_fps_hz = (
-        _coerce_optional_positive_float(fixed_fps_hz_override, field_name="fixed_fps override")
-        if fixed_fps_hz_override is not None
-        # Priority: CLI override > global fixed_fps > legacy analysis.fixed_fps_hz.
-        else (global_fixed_fps if global_fixed_fps is not None else analysis_fixed_fps_hz)
+    fixed_fps_hz, timebase_note = _resolve_analysis_timebase(
+        fixed_fps_hz_override=fixed_fps_hz_override,
+        global_fixed_fps=global_fixed_fps,
+        analysis_fixed_fps_hz=analysis_fixed_fps_hz,
+        analysis_cfg=analysis_cfg,
+        metadata=metadata,
     )
     output_plots = (
         output_plots_override
         if output_plots_override is not None
         else bool(analysis_cfg.get("output_plots", True))
     )
-    logger.info("Analyze options: output_plots=%s fixed_fps_hz=%s cm_per_px=%s", output_plots, fixed_fps_hz, cm_per_px)
+    logger.info(
+        "Analyze options: output_plots=%s fixed_fps_hz=%s cm_per_px=%s timebase=%s",
+        output_plots,
+        fixed_fps_hz,
+        cm_per_px,
+        timebase_note,
+    )
 
     df = pd.read_csv(log_path)
     if len(df) > 0:
@@ -210,6 +217,45 @@ def _coerce_optional_positive_int(value: object) -> Optional[int]:
     if parsed <= 0:
         return None
     return parsed
+
+
+def _resolve_analysis_timebase(
+    fixed_fps_hz_override: Optional[float],
+    global_fixed_fps: Optional[float],
+    analysis_fixed_fps_hz: Optional[float],
+    analysis_cfg: dict,
+    metadata: dict,
+) -> Tuple[Optional[float], str]:
+    # Explicit CLI override always wins.
+    if fixed_fps_hz_override is not None:
+        forced = _coerce_optional_positive_float(fixed_fps_hz_override, field_name="fixed_fps override")
+        return forced, "fixed(cli_override)"
+
+    mode_raw = str(analysis_cfg.get("timebase_mode", "auto")).strip().lower()
+    if mode_raw in {"auto", ""}:
+        # Auto policy:
+        # - realtime sessions -> wall-clock t_wall (robust to fps jitter)
+        # - offline_fast replays -> fixed fps timebase (video-time semantics)
+        offline_fast = bool(metadata.get("offline_fast", False))
+        if offline_fast:
+            fixed = global_fixed_fps if global_fixed_fps is not None else analysis_fixed_fps_hz
+            if fixed is not None:
+                return fixed, "fixed(auto_offline_fast)"
+        return None, "wall(auto)"
+
+    if mode_raw in {"wall", "realtime", "t_wall"}:
+        return None, "wall(config)"
+
+    if mode_raw in {"fixed", "fps", "frame"}:
+        fixed = global_fixed_fps if global_fixed_fps is not None else analysis_fixed_fps_hz
+        if fixed is None:
+            raise ValueError(
+                "analysis.timebase_mode=fixed requires fixed FPS config "
+                "(set top-level fixed_fps or analysis.fixed_fps_hz)"
+            )
+        return fixed, "fixed(config)"
+
+    raise ValueError("analysis.timebase_mode must be one of: auto|wall|fixed")
 
 
 def _resolve_frame_shape(
