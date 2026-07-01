@@ -36,7 +36,7 @@ def test_runtime_priority_manager_posix_path_with_mocked_nice(monkeypatch) -> No
     import cpp_dlc_live.realtime.performance as perf_mod
 
     monkeypatch.setattr(perf_mod.sys, "platform", "linux")
-    monkeypatch.setattr(perf_mod.os, "nice", fake_nice)
+    monkeypatch.setattr(perf_mod.os, "nice", fake_nice, raising=False)
 
     manager = RuntimePriorityManager({"enabled": True, "level": "high"}, logger=logging.getLogger("test"))
     result = manager.apply()

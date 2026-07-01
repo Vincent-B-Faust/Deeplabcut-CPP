@@ -67,13 +67,13 @@ def prepare_session_dir(config: Dict[str, Any], out_dir_override: Optional[str] 
 
 def ensure_prefixed_filename(filename: str, prefix: str) -> str:
     raw = str(filename).strip()
-    path = Path(raw)
-    base = path.name
+    separator_index = max(raw.rfind("/"), raw.rfind("\\"))
+    parent = raw[: separator_index + 1]
+    base = raw[separator_index + 1 :]
     expected = f"{prefix}_"
     if base.startswith(expected):
         return raw
-    renamed = path.with_name(f"{prefix}_{base}")
-    return str(renamed)
+    return f"{parent}{prefix}_{base}"
 
 
 def build_session_suffix(session_info: Dict[str, Any]) -> str:
