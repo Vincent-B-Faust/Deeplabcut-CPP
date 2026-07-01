@@ -3,6 +3,8 @@
 
 # Python
 __pycache__/
+*.egg-info/
+*.ipynb
 *.pyc
 *.pyo
 *.pyd
